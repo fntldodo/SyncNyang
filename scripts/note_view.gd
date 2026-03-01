@@ -1,16 +1,23 @@
 extends Control
 
-## NoteView — procedural drawing for tap (CAN), scratch (FISH), moving (LINE).
-## Supports diagonal rotation (fish) and debug key hints.
+## NoteView — procedural drawing for tap (CAN), scratch (FISH), 꾹꾹 (CHURU STRIP).
+## TICKET 8.2: time-based smooth consume + on-track tint + near-end highlight.
 
 var note_type: String = "tap"
 var diag: String = "\\"
 var lane_pair: int = -1
-var note_len: float = 0.6  # for moving notes: visual length in seconds
+var note_len: float = 1.2
+
+## 꾹꾹 visual state (updated by game_controller each frame)
+var time_progress: float = 0.0   # 0..1 time through [start_t, end_t] — controls consume
+var on_track_now: bool = false    # currently holding correct lane
+var in_hold_window: bool = false  # within [start_t, end_t]
+var near_end: bool = false        # near end_t — "ready to release" highlight
+var is_holding: bool = false      # note has been started (pressed)
 
 const NOTE_SIZE := Vector2(130, 130)
 const SCRATCH_SIZE := Vector2(160, 130)
-const MOVING_SIZE := Vector2(100, 130)
+const STRIP_WIDTH := 80.0
 
 const DEBUG_HINT := true
 
@@ -28,20 +35,31 @@ const FISH_OUTLINE := Color(0.36, 0.29, 0.24, 0.95)
 const FISH_EYE := Color(0.15, 0.15, 0.2)
 const FISH_CLAW := Color(0.36, 0.29, 0.24, 0.5)
 
-# LINE (moving) colors
-const LINE_BODY := Color(0.92, 0.55, 0.75, 0.9)
-const LINE_GLOW := Color(1.0, 0.7, 0.85, 0.35)
-const LINE_OUTLINE := Color(0.6, 0.3, 0.45, 0.95)
-const LINE_STAR := Color(1.0, 0.95, 0.7, 0.9)
+# CHURU STRIP colors — on-track (bright)
+const STRIP_ON := Color(0.95, 0.55, 0.75, 0.9)
+const STRIP_ON_GLOW := Color(1.0, 0.7, 0.88, 0.4)
+const STRIP_ON_HIGHLIGHT := Color(1.0, 0.88, 0.93, 0.6)
+# off-track (dimmed)
+const STRIP_OFF := Color(0.55, 0.48, 0.52, 0.5)
+const STRIP_OFF_GLOW := Color(0.6, 0.55, 0.58, 0.15)
+# shared
+const STRIP_OUTLINE := Color(0.6, 0.3, 0.45, 0.9)
+const STRIP_STAR := Color(1.0, 0.95, 0.7, 0.85)
+const STRIP_PAW := Color(0.6, 0.3, 0.45, 0.35)
+# near-end release indicator
+const STRIP_END_GLOW := Color(1.0, 0.95, 0.5, 0.6)
 
 # Hint colors
 const HINT_BG := Color(0.1, 0.1, 0.1, 0.6)
 const HINT_FG := Color(1.0, 1.0, 0.7, 0.9)
 
+var _full_height: float = 130.0
+
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-func setup(type: String, diag_dir: String = "\\", note_lane: int = 0, len_sec: float = 0.6) -> void:
+func setup(type: String, diag_dir: String = "\\", note_lane: int = 0,
+		len_sec: float = 1.2, approach_time: float = 1.2, travel_dist: float = 1200.0) -> void:
 	note_type = type
 	diag = diag_dir
 	note_len = len_sec
@@ -52,8 +70,11 @@ func setup(type: String, diag_dir: String = "\\", note_lane: int = 0, len_sec: f
 		rotation_degrees = -15.0 if diag == "/" else 15.0
 	elif type == "moving":
 		lane_pair = -1
-		custom_minimum_size = MOVING_SIZE
-		size = MOVING_SIZE
+		var strip_h: float = (len_sec / maxf(approach_time, 0.1)) * travel_dist
+		strip_h = maxf(strip_h, 80.0)
+		_full_height = strip_h
+		custom_minimum_size = Vector2(STRIP_WIDTH, strip_h)
+		size = Vector2(STRIP_WIDTH, strip_h)
 		rotation_degrees = 0.0
 	else:
 		lane_pair = -1
@@ -67,7 +88,7 @@ func _draw() -> void:
 	if note_type == "tap":
 		_draw_can()
 	elif note_type == "moving":
-		_draw_line_note()
+		_draw_churu_strip()
 	else:
 		_draw_fish()
 		_draw_debug_hint()
@@ -120,35 +141,71 @@ func _draw_fish() -> void:
 	draw_circle(Vector2(eye_x, cy - 4), w * 0.025, FISH_EYE)
 	_draw_body_claws(cx, cy, ry)
 
-## ---- LINE (moving note) — churu tube ----
+## ---- CHURU STRIP (꾹꾹) with time-based smooth consume ----
 
-func _draw_line_note() -> void:
+func _draw_churu_strip() -> void:
 	var w: float = size.x
-	var h: float = size.y
+	var h: float = _full_height
 	var cx: float = w * 0.5
+	var tube_w: float = w * 0.55
+	var half_tw: float = tube_w * 0.5
+
+	# Time-based consume: top portion disappears smoothly
+	var consumed_px: float = h * clampf(time_progress, 0.0, 0.95)
+	var draw_top: float = consumed_px
+	var draw_h: float = h - consumed_px
+	if draw_h < 14.0:
+		draw_h = 14.0
+		draw_top = h - 14.0
+
+	# Choose colors based on hold correctness
+	var body_col: Color = STRIP_ON if (on_track_now and is_holding) else STRIP_OFF
+	var glow_col: Color = STRIP_ON_GLOW if (on_track_now and is_holding) else STRIP_OFF_GLOW
+
+	# If not yet started (idle), show full brightness
+	if not is_holding and time_progress < 0.01:
+		body_col = STRIP_ON
+		glow_col = STRIP_ON_GLOW
+
 	# Outer glow
-	var glow_rect := Rect2(cx - 24, 4, 48, h - 8)
-	draw_rect(glow_rect, LINE_GLOW)
-	# Tube body (rounded feel via layered rects)
-	var tube_rect := Rect2(cx - 16, 8, 32, h - 16)
-	draw_rect(tube_rect, LINE_BODY)
-	# Highlight stripe
-	draw_rect(Rect2(cx - 6, 10, 12, h - 20), Color(1.0, 0.85, 0.92, 0.5))
+	draw_rect(Rect2(cx - half_tw - 8, draw_top, tube_w + 16, draw_h), glow_col)
+	# Main tube body
+	draw_rect(Rect2(cx - half_tw, draw_top + 2, tube_w, draw_h - 4), body_col)
+	# Center highlight (only when on-track)
+	if on_track_now and is_holding:
+		draw_rect(Rect2(cx - 5, draw_top + 4, 10, draw_h - 8), STRIP_ON_HIGHLIGHT)
 	# Outline
-	draw_rect(tube_rect, LINE_OUTLINE, false, 2.5)
-	# Cap top (squeeze top)
-	draw_rect(Rect2(cx - 20, 4, 40, 10), LINE_OUTLINE, false, 2.0)
-	# Small star/sparkle at bottom
-	_draw_sparkle(Vector2(cx, h - 18))
-	# Tiny paw at center
-	_draw_tiny_paw(Vector2(cx, h * 0.45), LINE_OUTLINE)
+	draw_rect(Rect2(cx - half_tw, draw_top + 2, tube_w, draw_h - 4), STRIP_OUTLINE, false, 2.5)
+
+	# Top cap
+	draw_rect(Rect2(cx - half_tw - 3, draw_top, tube_w + 6, 5), STRIP_OUTLINE, false, 2.0)
+	# Bottom cap
+	draw_rect(Rect2(cx - half_tw - 3, h - 5, tube_w + 6, 5), STRIP_OUTLINE, false, 2.0)
+
+	# Paw marks on remaining strip
+	var paw_y: float = draw_top + 50.0
+	while paw_y < h - 30.0:
+		_draw_tiny_paw(Vector2(cx, paw_y), STRIP_PAW)
+		paw_y += 120.0
+
+	# Bottom sparkle (hit point indicator)
+	_draw_sparkle(Vector2(cx, h - 16))
+
+	# Near-end release highlight — golden glow at bottom
+	if near_end and is_holding:
+		draw_circle(Vector2(cx, h - 8), 22.0, STRIP_END_GLOW)
+		draw_circle(Vector2(cx, h - 8), 14.0, Color(1.0, 0.98, 0.8, 0.4))
+
+	# On-track holding ring at bottom
+	if on_track_now and is_holding and in_hold_window:
+		draw_circle(Vector2(cx, h - 8), 18.0, Color(1.0, 0.9, 0.6, 0.3))
 
 func _draw_sparkle(pos: Vector2) -> void:
-	var arm: float = 8.0
-	draw_line(pos + Vector2(-arm, 0), pos + Vector2(arm, 0), LINE_STAR, 2.0)
-	draw_line(pos + Vector2(0, -arm), pos + Vector2(0, arm), LINE_STAR, 2.0)
-	draw_line(pos + Vector2(-5, -5), pos + Vector2(5, 5), LINE_STAR, 1.5)
-	draw_line(pos + Vector2(5, -5), pos + Vector2(-5, 5), LINE_STAR, 1.5)
+	var arm: float = 7.0
+	draw_line(pos + Vector2(-arm, 0), pos + Vector2(arm, 0), STRIP_STAR, 2.0)
+	draw_line(pos + Vector2(0, -arm), pos + Vector2(0, arm), STRIP_STAR, 2.0)
+	draw_line(pos + Vector2(-5, -5), pos + Vector2(5, 5), STRIP_STAR, 1.5)
+	draw_line(pos + Vector2(5, -5), pos + Vector2(-5, 5), STRIP_STAR, 1.5)
 
 ## ---- Debug key hint (editor only) ----
 
@@ -158,8 +215,7 @@ func _draw_debug_hint() -> void:
 	var key: String = _get_hint_key()
 	if key.is_empty():
 		return
-	var w: float = size.x
-	var pos := Vector2(w - 20, 14)
+	var pos := Vector2(size.x - 20, 14)
 	draw_circle(pos, 14.0, HINT_BG)
 	draw_string(ThemeDB.fallback_font, pos + Vector2(-7, 7), key, HORIZONTAL_ALIGNMENT_CENTER, -1, 20, HINT_FG)
 

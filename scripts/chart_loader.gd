@@ -28,7 +28,7 @@ static func load_chart(track_id: String, diff: String) -> Dictionary:
 			nd["lane"] = 1
 		# Moving note: default len
 		if str(nd.get("type", "")) == "moving" and not nd.has("len"):
-			nd["len"] = 0.6
+			nd["len"] = 1.2
 	notes.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return a.get("t", 0.0) < b.get("t", 0.0)
 	)
