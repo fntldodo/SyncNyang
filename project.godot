@@ -21,6 +21,7 @@ config/features=PackedStringArray("4.6")
 [autoload]
 
 SceneRouter="*res://scripts/scene_router.gd"
+SaveData="*res://scripts/save_data.gd"
 
 [display]
 
@@ -28,3 +29,11 @@ window/size/viewport_width=1080
 window/size/viewport_height=1920
 window/stretch/mode="canvas_items"
 window/handheld/orientation=1
+
+[gui]
+
+theme/custom="res://ui/theme_main.tres"
+
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true

@@ -1,6 +1,9 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=5 format=3]
 [ext_resource type="Script" path="res://scripts/game_ui.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/game_controller.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/effects_pawprint.gd" id="3"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_tap"]
 
 [node name="Game" type="Control"]
 layout_mode = 3
@@ -18,19 +21,42 @@ anchor_bottom = 1.0
 mouse_filter = 2
 color = Color(0.92, 0.96, 0.97, 1)
 
+[node name="LaneGuide1" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 358.0
+offset_top = 80.0
+offset_right = 362.0
+offset_bottom = 1420.0
+mouse_filter = 2
+color = Color(0.65, 0.68, 0.72, 0.4)
+
+[node name="LaneGuide2" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 718.0
+offset_top = 80.0
+offset_right = 722.0
+offset_bottom = 1420.0
+mouse_filter = 2
+color = Color(0.65, 0.68, 0.72, 0.4)
+
+[node name="TapArea" type="Panel" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_tap")
+
 [node name="TopBar" type="HBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 10
-anchor_left = 0.0
-anchor_top = 0.0
 anchor_right = 1.0
-anchor_bottom = 0.0
-offset_left = 12.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = 68.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 80.0
 alignment = 1
-theme_override_constants/separation = 10
+theme_override_constants/separation = 6
 
 [node name="BackBtn" type="Button" parent="TopBar"]
 layout_mode = 2
@@ -40,36 +66,48 @@ text = "BACK"
 layout_mode = 2
 size_flags_horizontal = 3
 
+[node name="DiffRow" type="HBoxContainer" parent="TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Spacer2" type="Control" parent="TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
 [node name="NextBtn" type="Button" parent="TopBar"]
 layout_mode = 2
 text = "RESULT"
 
+[node name="CursorIndicator" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 340.0
+offset_top = 1388.0
+offset_right = 420.0
+offset_bottom = 1416.0
+mouse_filter = 2
+color = Color(0.92, 0.55, 0.75, 0.35)
+
 [node name="HitLine" type="ColorRect" parent="."]
 layout_mode = 0
-offset_left = 40.0
-offset_top = 1400.0
-offset_right = 1040.0
+offset_left = 30.0
+offset_top = 1398.0
+offset_right = 1050.0
 offset_bottom = 1406.0
 mouse_filter = 2
-color = Color(0.6, 0.6, 0.6, 0.8)
+color = Color(0.5, 0.5, 0.55, 0.85)
 
-[node name="Note" type="ColorRect" parent="."]
-layout_mode = 0
-visible = false
-offset_left = 500.0
-offset_top = 200.0
-offset_right = 580.0
-offset_bottom = 280.0
+[node name="NotesLayer" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 mouse_filter = 2
-color = Color(0.95, 0.55, 0.3, 1)
 
 [node name="JudgeLabel" type="Label" parent="."]
 layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
-anchor_top = 0.0
-anchor_bottom = 0.0
 offset_left = -200.0
 offset_top = 100.0
 offset_right = 200.0
@@ -79,6 +117,14 @@ horizontal_alignment = 1
 vertical_alignment = 1
 theme_override_font_sizes/font_size = 48
 modulate = Color(1, 1, 1, 0)
+
+[node name="FxLayer" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("3")
 
 [node name="GameController" type="Node" parent="."]
 script = ExtResource("2")

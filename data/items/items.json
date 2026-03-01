@@ -1,0 +1,30 @@
+{
+  "items": [
+    {"id": "fur_beige",     "cat": "fur_color",  "rarity": "common", "name": "Beige Fur"},
+    {"id": "fur_gray",      "cat": "fur_color",  "rarity": "common", "name": "Gray Fur"},
+    {"id": "fur_orange",    "cat": "fur_color",  "rarity": "common", "name": "Orange Tabby"},
+    {"id": "fur_black",     "cat": "fur_color",  "rarity": "common", "name": "Black Fur"},
+
+    {"id": "outfit_scarf",  "cat": "outfit",     "rarity": "common", "name": "Warm Scarf"},
+    {"id": "outfit_hoodie", "cat": "outfit",     "rarity": "common", "name": "Cat Hoodie"},
+    {"id": "outfit_ribbon", "cat": "outfit",     "rarity": "rare",   "name": "Silk Ribbon"},
+    {"id": "outfit_cape",   "cat": "outfit",     "rarity": "rare",   "name": "Hero Cape"},
+
+    {"id": "acc_bell",      "cat": "accessory",  "rarity": "common", "name": "Tiny Bell"},
+    {"id": "acc_glasses",   "cat": "accessory",  "rarity": "common", "name": "Round Glasses"},
+    {"id": "acc_crown",     "cat": "accessory",  "rarity": "rare",   "name": "Mini Crown"},
+    {"id": "acc_halo",      "cat": "accessory",  "rarity": "rare",   "name": "Angel Halo"},
+
+    {"id": "pedi_pink",     "cat": "pedicure",   "rarity": "common", "name": "Pink Paws"},
+    {"id": "pedi_sky",      "cat": "pedicure",   "rarity": "common", "name": "Sky Blue Paws"},
+    {"id": "pedi_gold",     "cat": "pedicure",   "rarity": "rare",   "name": "Gold Paws"},
+    {"id": "pedi_galaxy",   "cat": "pedicure",   "rarity": "epic",   "name": "Galaxy Paws"}
+  ],
+  "rarity_weights": {
+    "S": {"common": 70, "rare": 25, "epic": 5},
+    "A": {"common": 80, "rare": 18, "epic": 2},
+    "B": {"common": 88, "rare": 11, "epic": 1},
+    "C": {"common": 94, "rare": 6,  "epic": 0},
+    "D": {"common": 97, "rare": 3,  "epic": 0}
+  }
+}
