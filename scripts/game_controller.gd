@@ -87,7 +87,7 @@ func handle_tap(lane: int) -> int:
 func handle_scratch(lane_pair: int) -> int:
 	return _judge_nearest("scratch", lane_pair, -1)
 
-## TICKET 8.2: press on a lane → start a 꾹꾹 hold
+## TICKET 8.2+8.3: press on a lane → start a 꾹꾹 hold (with late latch grace)
 func handle_moving_press(lane: int) -> void:
 	if not _running:
 		return
@@ -102,10 +102,20 @@ func handle_moving_press(lane: int) -> void:
 		if str(entry.get("m_state", "idle")) != "idle":
 			continue
 		var start_t: float = float(entry.get("t", 0.0))
+		var end_t: float = start_t + float(entry.get("len", 1.2))
 		var delta_ms: float = (t - start_t) * 1000.0
+		# Normal start: within ±130ms
 		if absf(delta_ms) <= 130.0:
 			entry["m_state"] = "holding"
 			entry["start_grade"] = Judgement.get_grade(delta_ms)
+			return
+		# Late latch grace: after start window but before end_t
+		if delta_ms > 130.0 and t < end_t:
+			entry["m_state"] = "holding"
+			if delta_ms <= 350.0:
+				entry["start_grade"] = Judgement.Grade.GOOD
+			else:
+				entry["start_grade"] = Judgement.Grade.SO_SO
 			return
 
 ## TICKET 8.2: release on a lane → end a 꾹꾹 hold
@@ -192,8 +202,8 @@ func _update_active_notes(t: float) -> void:
 				if on_lane:
 					entry["good_samples"] = int(entry.get("good_samples", 0)) + 1
 
-			# Auto-miss: idle and past start window
-			if m_state == "idle" and t > entry_t + MISS_WINDOW_SEC:
+			# Auto-miss: idle and past end_t (never pressed at all — grace period expired)
+			if m_state == "idle" and t > end_t:
 				_miss_moving(entry)
 				to_remove.append(i)
 				continue

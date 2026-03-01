@@ -137,7 +137,7 @@ func _update_ring_indicators() -> void:
 ## ---- Hit boxes (per lane at hitline) ----
 
 func _create_hit_boxes() -> void:
-	var box_w: float = _lane_width * 0.85
+	var box_w: float = _lane_width * 0.92
 	var box_y: float = hit_line.position.y - HIT_ZONE_HEIGHT * 0.5
 	for i in range(NUM_LANES):
 		var box := ColorRect.new()
