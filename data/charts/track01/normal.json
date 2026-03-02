@@ -99,6 +99,113 @@
             "t": 12.7,
             "type": "tap",
             "lane": 2
+        },
+        {
+            "t": 13.2,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 13.7,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "\\"
+        },
+        {
+            "t": 14.2,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 14.7,
+            "type": "moving",
+            "lane": 2,
+            "len": 1.2
+        },
+        {
+            "t": 16.2,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 16.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 17.2,
+            "type": "scratch",
+            "lane": 1,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 17.7,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 18.2,
+            "type": "moving",
+            "lane": 0,
+            "len": 1.2
+        },
+        {
+            "t": 19.7,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 20.2,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 20.7,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 21.2,
+            "type": "moving",
+            "lane": 1,
+            "len": 1.2
+        },
+        {
+            "t": 22.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 23.2,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 23.7,
+            "type": "scratch",
+            "lane": 1,
+            "span": 2,
+            "diag": "\\"
+        },
+        {
+            "t": 24.2,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 24.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 25.2,
+            "type": "moving",
+            "lane": 2,
+            "len": 1.2
         }
     ]
 }

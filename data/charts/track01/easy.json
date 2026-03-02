@@ -74,6 +74,95 @@
             "t": 12.8,
             "type": "tap",
             "lane": 0
+        },
+        {
+            "t": 13.5,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 14.2,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 14.9,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 15.6,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 16.3,
+            "type": "moving",
+            "lane": 2,
+            "len": 1.4
+        },
+        {
+            "t": 18.0,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 18.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 19.4,
+            "type": "scratch",
+            "lane": 1,
+            "span": 2,
+            "diag": "\\"
+        },
+        {
+            "t": 20.1,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 20.8,
+            "type": "moving",
+            "lane": 1,
+            "len": 1.4
+        },
+        {
+            "t": 22.5,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 23.2,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 23.9,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 24.6,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 25.3,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 26.0,
+            "type": "moving",
+            "lane": 2,
+            "len": 1.4
         }
     ]
 }

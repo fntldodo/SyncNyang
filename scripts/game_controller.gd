@@ -5,6 +5,9 @@ extends Node
 
 signal judgement_emitted(grade: int, delta_ms: float)
 signal run_finished()
+signal gauge_changed(value: float)
+signal fever_started()
+signal fever_ended()
 
 const Judgement := preload("res://scripts/judgement.gd")
 const ChartLoader := preload("res://scripts/chart_loader.gd")
@@ -46,6 +49,16 @@ var _count_good: int = 0
 var _count_soso: int = 0
 var _count_miss: int = 0
 
+## Churu gauge + Fever (TICKET 10)
+const GAUGE_MAX := 200.0
+const FEVER_DURATION := 8.0
+const FEVER_MULTIPLIER := 1.2
+const GAUGE_GAIN := {0: 15.0, 1: 12.0, 2: 8.0, 3: 4.0, 4: 0.0}  # PERFECT..MISS
+var gauge: float = 0.0
+var is_fever: bool = false
+var _fever_end_time: float = 0.0
+var _fever_count: int = 0
+
 func start_run(diff: String = "normal") -> void:
 	var chart: Dictionary = ChartLoader.load_chart("track01", diff)
 	_chart_notes = chart.get("notes", [])
@@ -53,6 +66,10 @@ func start_run(diff: String = "normal") -> void:
 	_spawn_index = 0
 	_clear_active_notes()
 	_reset_counters()
+	gauge = 0.0
+	is_fever = false
+	_fever_end_time = 0.0
+	_fever_count = 0
 	cursor_lane = 1
 	cursor_holding = false
 	_start_ticks = Time.get_ticks_msec()
@@ -77,6 +94,7 @@ func process_update() -> void:
 	var t: float = now_sec()
 	_spawn_pending_notes(t)
 	_update_active_notes(t)
+	_update_fever(t)
 	_check_run_complete()
 
 ## ---- Input handlers ----
@@ -407,3 +425,29 @@ func _inc(grade: int) -> void:
 		Judgement.Grade.GOOD: _count_good += 1
 		Judgement.Grade.SO_SO: _count_soso += 1
 		Judgement.Grade.MISS: _count_miss += 1
+	_update_gauge(grade)
+
+## ---- Churu Gauge + Fever (TICKET 10) ----
+
+func _update_gauge(grade: int) -> void:
+	var gain: float = GAUGE_GAIN.get(grade, 0.0)
+	gauge = clampf(gauge + gain, 0.0, GAUGE_MAX)
+	gauge_changed.emit(gauge)
+	if gauge >= GAUGE_MAX and not is_fever:
+		_start_fever()
+
+func _start_fever() -> void:
+	is_fever = true
+	gauge = 0.0
+	_fever_end_time = now_sec() + FEVER_DURATION
+	_fever_count += 1
+	gauge_changed.emit(gauge)
+	fever_started.emit()
+
+func _update_fever(t: float) -> void:
+	if is_fever and t >= _fever_end_time:
+		is_fever = false
+		fever_ended.emit()
+
+func get_score_multiplier() -> float:
+	return FEVER_MULTIPLIER if is_fever else 1.0

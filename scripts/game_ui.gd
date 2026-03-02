@@ -1,7 +1,7 @@
 extends Control
 
 ## Game UI — input wiring, lane detection, difficulty selector.
-## TICKET 8.2: QWE press-hold-release for 꾹꾹 + ring indicators.
+## TICKET 10: Churu gauge bar + Fever overlay.
 
 const Judgement := preload("res://scripts/judgement.gd")
 
@@ -57,11 +57,25 @@ var _ring_nodes: Array = []
 var _hitbox_nodes: Array = []
 const HIT_ZONE_HEIGHT := 110.0
 
+## Churu gauge UI (TICKET 10)
+var _gauge_bg: ColorRect = null
+var _gauge_fill: ColorRect = null
+const GAUGE_BAR_W := 700.0
+const GAUGE_BAR_H := 16.0
+
+## Fever overlay (TICKET 10)
+var _fever_overlay: ColorRect = null
+var _fever_label: Label = null
+var _fever_tween: Tween = null
+
 func _ready() -> void:
 	back_btn.pressed.connect(_on_back)
 	next_btn.pressed.connect(_on_next)
 	game_controller.judgement_emitted.connect(_on_judgement)
 	game_controller.run_finished.connect(_on_run_finished)
+	game_controller.gauge_changed.connect(_on_gauge_changed)
+	game_controller.fever_started.connect(_on_fever_started)
+	game_controller.fever_ended.connect(_on_fever_ended)
 	tap_area.gui_input.connect(_on_tap_area_input)
 	judge_label.modulate.a = 0.0
 
@@ -70,6 +84,8 @@ func _ready() -> void:
 	_setup_controller()
 	_create_ring_indicators()
 	_create_hit_boxes()
+	_create_gauge_bar()
+	_create_fever_overlay()
 	_update_cursor_visual()
 	_start_chart(_current_diff)
 
@@ -156,7 +172,107 @@ func _flash_hit_box(lane: int) -> void:
 	var box: ColorRect = _hitbox_nodes[lane]
 	var tw := create_tween()
 	box.color = Color(1.0, 0.92, 0.7, 0.25)
-	tw.tween_property(box, "color", Color(0.95, 0.88, 0.75, 0.08), 0.12)  # dim when not held
+	tw.tween_property(box, "color", Color(0.95, 0.88, 0.75, 0.08), 0.12)
+
+## ---- Churu Gauge Bar (TICKET 10) ----
+
+func _create_gauge_bar() -> void:
+	var vw: float = get_viewport().get_visible_rect().size.x
+	var bar_x: float = (vw - GAUGE_BAR_W) * 0.5
+	var bar_y: float = 1240.0  # above target zone
+	# Background (cream)
+	_gauge_bg = ColorRect.new()
+	_gauge_bg.size = Vector2(GAUGE_BAR_W, GAUGE_BAR_H)
+	_gauge_bg.position = Vector2(bar_x, bar_y)
+	_gauge_bg.color = Color(0.96, 0.93, 0.88, 0.5)
+	_gauge_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_gauge_bg)
+	# Fill (coral pastel)
+	_gauge_fill = ColorRect.new()
+	_gauge_fill.size = Vector2(0, GAUGE_BAR_H - 4)
+	_gauge_fill.position = Vector2(bar_x + 2, bar_y + 2)
+	_gauge_fill.color = Color(0.95, 0.55, 0.65, 0.8)
+	_gauge_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_gauge_fill)
+
+func _on_gauge_changed(value: float) -> void:
+	if _gauge_fill:
+		var ratio: float = clampf(value / 100.0, 0.0, 1.0)
+		_gauge_fill.size.x = (GAUGE_BAR_W - 4) * ratio
+		# Color shifts toward gold as gauge fills
+		_gauge_fill.color = Color(
+			lerpf(0.95, 1.0, ratio),
+			lerpf(0.55, 0.85, ratio),
+			lerpf(0.65, 0.4, ratio),
+			0.8
+		)
+
+## ---- Fever Overlay (TICKET 10) ----
+
+func _create_fever_overlay() -> void:
+	# Fullscreen overlay (hidden by default)
+	_fever_overlay = ColorRect.new()
+	_fever_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_fever_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fever_overlay.color = Color(1.0, 0.8, 0.9, 0.0)
+	_fever_overlay.visible = false
+	add_child(_fever_overlay)
+	# FEVER label (hidden) — big and flashy
+	_fever_label = Label.new()
+	_fever_label.text = "🔥 FEVER TIME 🔥"
+	_fever_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_fever_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_fever_label.position = Vector2(-250, 160)
+	_fever_label.size = Vector2(500, 100)
+	_fever_label.add_theme_font_size_override("font_size", 80)
+	_fever_label.modulate = Color(1.0, 0.85, 0.2, 0.0)
+	_fever_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fever_label.pivot_offset = Vector2(250, 50)
+	add_child(_fever_label)
+
+func _on_fever_started() -> void:
+	if _fever_overlay:
+		_fever_overlay.visible = true
+		_start_rainbow_cycle()
+	# Big flashy FEVER label entrance
+	if _fever_label:
+		_fever_label.scale = Vector2(0.3, 0.3)
+		_fever_label.modulate.a = 1.0
+		var tw := create_tween()
+		# Bounce in
+		tw.tween_property(_fever_label, "scale", Vector2(1.2, 1.2), 0.15).set_ease(Tween.EASE_OUT)
+		tw.tween_property(_fever_label, "scale", Vector2(0.9, 0.9), 0.1)
+		tw.tween_property(_fever_label, "scale", Vector2(1.0, 1.0), 0.08)
+		# Hold visible
+		tw.tween_interval(1.2)
+		# Fade out
+		tw.tween_property(_fever_label, "modulate:a", 0.0, 0.3)
+
+func _on_fever_ended() -> void:
+	if _fever_overlay:
+		_fever_overlay.visible = false
+	if _fever_label:
+		_fever_label.modulate.a = 0.0
+	if _fever_tween and _fever_tween.is_valid():
+		_fever_tween.kill()
+		_fever_tween = null
+
+func _start_rainbow_cycle() -> void:
+	if _fever_tween and _fever_tween.is_valid():
+		_fever_tween.kill()
+	_fever_tween = create_tween().set_loops()
+	# Vivid rainbow colors — more intense alpha for visibility
+	var colors: Array[Color] = [
+		Color(1.0, 0.5, 0.5, 0.18),  # vivid red
+		Color(1.0, 0.75, 0.3, 0.18), # vivid orange
+		Color(1.0, 1.0, 0.4, 0.18),  # vivid yellow
+		Color(0.4, 1.0, 0.5, 0.18),  # vivid green
+		Color(0.4, 0.7, 1.0, 0.18),  # vivid blue
+		Color(0.7, 0.4, 1.0, 0.18),  # vivid purple
+		Color(1.0, 0.5, 0.75, 0.18), # vivid pink
+	]
+	for col in colors:
+		_fever_tween.tween_property(_fever_overlay, "color", col, 0.35)
 
 ## ---- Controller setup ----
 

@@ -15,9 +15,9 @@ var in_hold_window: bool = false  # within [start_t, end_t]
 var near_end: bool = false        # near end_t — "ready to release" highlight
 var is_holding: bool = false      # note has been started (pressed)
 
-const NOTE_SIZE := Vector2(130, 130)
-const SCRATCH_SIZE := Vector2(160, 130)
-const STRIP_WIDTH := 80.0
+const NOTE_SIZE := Vector2(170, 100)
+const SCRATCH_SIZE := Vector2(190, 100)
+const STRIP_WIDTH := 68.0
 
 const DEBUG_HINT := true
 
@@ -107,8 +107,8 @@ func _draw_can() -> void:
 	draw_rect(top_rect, CAN_TOP)
 	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.05, CAN_OUTLINE)
 	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.03, CAN_TOP)
-	draw_rect(body_rect, CAN_OUTLINE, false, 2.5)
-	draw_rect(top_rect, CAN_OUTLINE, false, 2.0)
+	draw_rect(body_rect, CAN_OUTLINE, false, 1.0)
+	draw_rect(top_rect, CAN_OUTLINE, false, 0.8)
 	_draw_tiny_paw(Vector2(cx, h * 0.52), CAN_OUTLINE)
 
 ## ---- FISH (scratch note) ----
@@ -134,7 +134,7 @@ func _draw_fish() -> void:
 	draw_colored_polygon(tail_pts, FISH_TAIL)
 	draw_polyline(PackedVector2Array([
 		tail_pts[0], tail_pts[1], tail_pts[2], tail_pts[0]
-	]), FISH_OUTLINE, 2.0)
+	]), FISH_OUTLINE, 0.8)
 	_draw_polygon_outline(body_pts)
 	var eye_x: float = cx + rx * 0.45
 	draw_circle(Vector2(eye_x, cy - 4), w * 0.04, Color.WHITE)
@@ -147,7 +147,7 @@ func _draw_churu_strip() -> void:
 	var w: float = size.x
 	var h: float = _full_height
 	var cx: float = w * 0.5
-	var tube_w: float = w * 0.55
+	var tube_w: float = w * 0.47
 	var half_tw: float = tube_w * 0.5
 
 	# Time-based consume: top portion disappears smoothly
@@ -175,18 +175,18 @@ func _draw_churu_strip() -> void:
 	if on_track_now and is_holding:
 		draw_rect(Rect2(cx - 5, draw_top + 4, 10, draw_h - 8), STRIP_ON_HIGHLIGHT)
 	# Outline
-	draw_rect(Rect2(cx - half_tw, draw_top + 2, tube_w, draw_h - 4), STRIP_OUTLINE, false, 2.5)
+	draw_rect(Rect2(cx - half_tw, draw_top + 2, tube_w, draw_h - 4), STRIP_OUTLINE, false, 1.6)
 
 	# Top cap
-	draw_rect(Rect2(cx - half_tw - 3, draw_top, tube_w + 6, 5), STRIP_OUTLINE, false, 2.0)
+	draw_rect(Rect2(cx - half_tw - 3, draw_top, tube_w + 6, 4), STRIP_OUTLINE, false, 1.3)
 	# Bottom cap
-	draw_rect(Rect2(cx - half_tw - 3, h - 5, tube_w + 6, 5), STRIP_OUTLINE, false, 2.0)
+	draw_rect(Rect2(cx - half_tw - 3, h - 4, tube_w + 6, 4), STRIP_OUTLINE, false, 1.3)
 
 	# Paw marks on remaining strip
 	var paw_y: float = draw_top + 50.0
 	while paw_y < h - 30.0:
 		_draw_tiny_paw(Vector2(cx, paw_y), STRIP_PAW)
-		paw_y += 120.0
+		paw_y += 160.0
 
 	# Bottom sparkle (hit point indicator)
 	_draw_sparkle(Vector2(cx, h - 16))
@@ -202,10 +202,10 @@ func _draw_churu_strip() -> void:
 
 func _draw_sparkle(pos: Vector2) -> void:
 	var arm: float = 7.0
-	draw_line(pos + Vector2(-arm, 0), pos + Vector2(arm, 0), STRIP_STAR, 2.0)
-	draw_line(pos + Vector2(0, -arm), pos + Vector2(0, arm), STRIP_STAR, 2.0)
-	draw_line(pos + Vector2(-5, -5), pos + Vector2(5, 5), STRIP_STAR, 1.5)
-	draw_line(pos + Vector2(5, -5), pos + Vector2(-5, 5), STRIP_STAR, 1.5)
+	draw_line(pos + Vector2(-arm, 0), pos + Vector2(arm, 0), STRIP_STAR, 1.3)
+	draw_line(pos + Vector2(0, -arm), pos + Vector2(0, arm), STRIP_STAR, 1.3)
+	draw_line(pos + Vector2(-5, -5), pos + Vector2(5, 5), STRIP_STAR, 1.0)
+	draw_line(pos + Vector2(5, -5), pos + Vector2(-5, 5), STRIP_STAR, 1.0)
 
 ## ---- Debug key hint (editor only) ----
 
@@ -232,12 +232,12 @@ func _draw_body_claws(cx: float, cy: float, ry: float) -> void:
 		draw_line(
 			Vector2(cx + ox - 6, cy - ry * 0.5),
 			Vector2(cx + ox + 6, cy + ry * 0.5),
-			FISH_CLAW, 3.0
+			FISH_CLAW, 1.2
 		)
 
 func _draw_polygon_outline(pts: PackedVector2Array) -> void:
 	for i in range(pts.size()):
-		draw_line(pts[i], pts[(i + 1) % pts.size()], FISH_OUTLINE, 2.0)
+		draw_line(pts[i], pts[(i + 1) % pts.size()], FISH_OUTLINE, 0.8)
 
 func _make_ellipse(cx: float, cy: float, rx: float, ry: float) -> PackedVector2Array:
 	var pts := PackedVector2Array()
@@ -247,7 +247,7 @@ func _make_ellipse(cx: float, cy: float, rx: float, ry: float) -> PackedVector2A
 	return pts
 
 func _draw_tiny_paw(pos: Vector2, color: Color) -> void:
-	draw_circle(pos + Vector2(0, 3), 6.0, color)
-	draw_circle(pos + Vector2(-7, -5), 3.5, color)
-	draw_circle(pos + Vector2(0, -8), 3.5, color)
-	draw_circle(pos + Vector2(7, -5), 3.5, color)
+	draw_circle(pos + Vector2(0, 2), 4.5, color)
+	draw_circle(pos + Vector2(-5, -4), 2.5, color)
+	draw_circle(pos + Vector2(0, -6), 2.5, color)
+	draw_circle(pos + Vector2(5, -4), 2.5, color)

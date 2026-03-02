@@ -113,6 +113,131 @@
             "t": 11.7,
             "type": "tap",
             "lane": 0
+        },
+        {
+            "t": 12.0,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 12.3,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 12.6,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 12.9,
+            "type": "moving",
+            "lane": 0,
+            "len": 0.9
+        },
+        {
+            "t": 14.1,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 14.4,
+            "type": "scratch",
+            "lane": 1,
+            "span": 2,
+            "diag": "\\"
+        },
+        {
+            "t": 14.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 15.0,
+            "type": "moving",
+            "lane": 2,
+            "len": 1.0
+        },
+        {
+            "t": 16.3,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 16.6,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 16.9,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 17.2,
+            "type": "moving",
+            "lane": 1,
+            "len": 0.9
+        },
+        {
+            "t": 18.4,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 18.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 19.0,
+            "type": "scratch",
+            "lane": 1,
+            "span": 2,
+            "diag": "\\"
+        },
+        {
+            "t": 19.3,
+            "type": "moving",
+            "lane": 0,
+            "len": 1.0
+        },
+        {
+            "t": 20.6,
+            "type": "tap",
+            "lane": 1
+        },
+        {
+            "t": 20.9,
+            "type": "tap",
+            "lane": 2
+        },
+        {
+            "t": 21.2,
+            "type": "scratch",
+            "lane": 0,
+            "span": 2,
+            "diag": "/"
+        },
+        {
+            "t": 21.5,
+            "type": "moving",
+            "lane": 2,
+            "len": 0.9
+        },
+        {
+            "t": 22.7,
+            "type": "tap",
+            "lane": 0
+        },
+        {
+            "t": 23.0,
+            "type": "tap",
+            "lane": 1
         }
     ]
 }
