@@ -8,7 +8,6 @@ const Judgement := preload("res://scripts/judgement.gd")
 ## TopBar
 @onready var back_btn: Button = $"TopBar/BackBtn"
 @onready var next_btn: Button = $"TopBar/NextBtn"
-@onready var diff_row: HBoxContainer = $"TopBar/DiffRow"
 
 ## Game elements
 @onready var hit_line: ColorRect = $"HitLine"
@@ -68,6 +67,10 @@ var _fever_overlay: ColorRect = null
 var _fever_label: Label = null
 var _fever_tween: Tween = null
 
+## Score/Combo labels (TICKET 10-3 / TICKET 12: from scene HudCard)
+@onready var _score_label: Label = $"TopBar/HudCard/HudVBox/ScoreLabel"
+@onready var _combo_label: Label = $"TopBar/HudCard/HudVBox/ComboLabel"
+
 func _ready() -> void:
 	back_btn.pressed.connect(_on_back)
 	next_btn.pressed.connect(_on_next)
@@ -76,17 +79,18 @@ func _ready() -> void:
 	game_controller.gauge_changed.connect(_on_gauge_changed)
 	game_controller.fever_started.connect(_on_fever_started)
 	game_controller.fever_ended.connect(_on_fever_ended)
+	game_controller.score_changed.connect(_on_score_changed)
 	tap_area.gui_input.connect(_on_tap_area_input)
 	judge_label.modulate.a = 0.0
 
 	_compute_lane_geometry()
-	_setup_diff_buttons()
 	_setup_controller()
 	_create_ring_indicators()
 	_create_hit_boxes()
 	_create_gauge_bar()
 	_create_fever_overlay()
 	_update_cursor_visual()
+	_current_diff = SceneRouter.selected_difficulty
 	_start_chart(_current_diff)
 
 func _process(_delta: float) -> void:
@@ -274,6 +278,19 @@ func _start_rainbow_cycle() -> void:
 	for col in colors:
 		_fever_tween.tween_property(_fever_overlay, "color", col, 0.35)
 
+## ---- Score / Combo Labels (TICKET 12: from scene HudCard) ----
+
+func _on_score_changed(new_score: int, new_combo: int) -> void:
+	if _score_label:
+		_score_label.text = str(new_score)
+	if _combo_label:
+		if new_combo >= 2:
+			_combo_label.text = "%d COMBO" % new_combo
+			_combo_label.add_theme_color_override("font_color", Color(0.85, 0.5, 0.2, 0.9))
+		else:
+			_combo_label.text = ""
+			_combo_label.add_theme_color_override("font_color", Color(0.85, 0.5, 0.2, 0.0))
+
 ## ---- Controller setup ----
 
 func _setup_controller() -> void:
@@ -283,16 +300,7 @@ func _setup_controller() -> void:
 	game_controller.lane_centers_x = _lane_centers
 	game_controller.hit_zone_half_h = HIT_ZONE_HEIGHT * 0.5
 
-## ---- Difficulty ----
-
-func _setup_diff_buttons() -> void:
-	var diffs: Array = ["easy", "normal", "hard"]
-	var labels: Array = ["EASY", "NORMAL", "HARD"]
-	for i in range(diffs.size()):
-		var btn := Button.new()
-		btn.text = labels[i]
-		btn.pressed.connect(_on_diff_selected.bind(diffs[i]))
-		diff_row.add_child(btn)
+## ---- Difficulty (TICKET 12: moved to Boot, kept internal for debug) ----
 
 func _on_diff_selected(diff: String) -> void:
 	_current_diff = diff

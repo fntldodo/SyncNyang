@@ -12,6 +12,7 @@ const RewardSystem := preload("res://scripts/reward_system.gd")
 @onready var stats_label: Label = $"Panel/StatsLabel"
 @onready var claim_btn: Button = $"Panel/ClaimBtn"
 @onready var reward_label: Label = $"Panel/RewardLabel"
+@onready var score_label: Label = $"Panel/ScoreLabel"
 
 var _reward_system: RefCounted = null
 var _claimed: bool = false
@@ -40,6 +41,7 @@ func _display_summary() -> void:
 		s.get("perfect", 0), s.get("excellent", 0),
 		s.get("good", 0), s.get("soso", 0), s.get("miss", 0)
 	]
+	score_label.text = "Score: %d" % s.get("score", 0)
 
 func _on_claim() -> void:
 	if _claimed:
@@ -54,10 +56,15 @@ func _on_claim() -> void:
 
 	var result: Dictionary = _reward_system.grant_clear_reward(s, SaveData)
 	var rarity_tag: String = result.get("item_rarity", "common").to_upper()
-	reward_label.text = "+%d coins  |  [%s] %s" % [
+	var bonus_pp: float = result.get("bonus_pp", 0.0)
+	var bonus_tag: String = ""
+	if bonus_pp > 0.001:
+		bonus_tag = "  (Luck +%d%%)" % int(roundf(bonus_pp * 100.0))
+	reward_label.text = "+%d coins  |  [%s] %s%s" % [
 		result.get("coins", 0),
 		rarity_tag,
-		result.get("item_name", "???")
+		result.get("item_name", "???"),
+		bonus_tag
 	]
 
 func _on_retry() -> void:
@@ -67,7 +74,7 @@ func _on_wardrobe() -> void:
 	SceneRouter.flow_to_wardrobe()
 
 func _on_back() -> void:
-	SceneRouter.back()
+	SceneRouter.flow_to_lobby()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):

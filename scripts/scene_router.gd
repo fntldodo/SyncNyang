@@ -2,12 +2,14 @@ extends Node
 
 const SCENE_BOOT := "res://scenes/Boot.tscn"
 const SCENE_CUTSCENE := "res://scenes/Cutscene.tscn"
+const SCENE_LOBBY := "res://scenes/Lobby.tscn"
 const SCENE_GAME := "res://scenes/Game.tscn"
 const SCENE_RESULT := "res://scenes/Result.tscn"
 const SCENE_WARDROBE := "res://scenes/Wardrobe.tscn"
 
 var _stack: Array[String] = []
 var _is_changing := false
+var selected_difficulty: String = "normal"
 
 func _ready() -> void:
 	if get_tree().current_scene == null:
@@ -61,6 +63,9 @@ func clear_to_boot() -> void:
 
 func flow_to_cutscene() -> void:
 	goto(SCENE_CUTSCENE)
+
+func flow_to_lobby() -> void:
+	goto(SCENE_LOBBY)
 
 func flow_to_game() -> void:
 	goto(SCENE_GAME)

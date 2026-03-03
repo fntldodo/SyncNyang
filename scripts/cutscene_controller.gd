@@ -53,7 +53,7 @@ func _next() -> void:
 		return
 	_index += 1
 	if _index >= CUTS.size():
-		SceneRouter.flow_to_game()
+		SceneRouter.flow_to_lobby()
 		return
 	_fade_to(_index)
 
@@ -65,7 +65,7 @@ func _on_back() -> void:
 func _on_skip() -> void:
 	if _transitioning:
 		return
-	SceneRouter.flow_to_game()
+	SceneRouter.flow_to_lobby()
 
 func _show_cut(idx: int) -> void:
 	var path: String = CUTS[idx]

@@ -8,6 +8,7 @@ signal run_finished()
 signal gauge_changed(value: float)
 signal fever_started()
 signal fever_ended()
+signal score_changed(score: int, combo: int)
 
 const Judgement := preload("res://scripts/judgement.gd")
 const ChartLoader := preload("res://scripts/chart_loader.gd")
@@ -53,11 +54,17 @@ var _count_miss: int = 0
 const GAUGE_MAX := 200.0
 const FEVER_DURATION := 8.0
 const FEVER_MULTIPLIER := 1.2
-const GAUGE_GAIN := {0: 15.0, 1: 12.0, 2: 8.0, 3: 4.0, 4: 0.0}  # PERFECT..MISS
+const GAUGE_GAIN := {0: 15.0, 1: 12.0, 2: 8.0, 3: 4.0, 4: -2.0}  # PERFECT..MISS
 var gauge: float = 0.0
 var is_fever: bool = false
 var _fever_end_time: float = 0.0
 var _fever_count: int = 0
+
+## Score + Combo (TICKET 10-3)
+const BASE_SCORE := 100
+const SCORE_WEIGHT := {0: 1.0, 1: 0.9, 2: 0.75, 3: 0.5, 4: 0.0}  # PERFECT..MISS
+var score: int = 0
+var combo: int = 0
 
 func start_run(diff: String = "normal") -> void:
 	var chart: Dictionary = ChartLoader.load_chart("track01", diff)
@@ -181,7 +188,8 @@ func get_run_summary() -> Dictionary:
 	elif peg_r >= 0.7:
 		rank = "B"
 	return {"rank": rank, "perfect": _count_perfect, "excellent": _count_excellent,
-		"good": _count_good, "soso": _count_soso, "miss": _count_miss, "total": total}
+		"good": _count_good, "soso": _count_soso, "miss": _count_miss, "total": total,
+		"score": score, "combo_max": combo, "fever_count": _fever_count}
 
 ## ---- Internal ----
 
@@ -417,6 +425,8 @@ func _reset_counters() -> void:
 	_count_good = 0
 	_count_soso = 0
 	_count_miss = 0
+	score = 0
+	combo = 0
 
 func _inc(grade: int) -> void:
 	match grade:
@@ -426,6 +436,7 @@ func _inc(grade: int) -> void:
 		Judgement.Grade.SO_SO: _count_soso += 1
 		Judgement.Grade.MISS: _count_miss += 1
 	_update_gauge(grade)
+	_update_score(grade)
 
 ## ---- Churu Gauge + Fever (TICKET 10) ----
 
@@ -451,3 +462,17 @@ func _update_fever(t: float) -> void:
 
 func get_score_multiplier() -> float:
 	return FEVER_MULTIPLIER if is_fever else 1.0
+
+## ---- Score + Combo (TICKET 10-3) ----
+
+func _update_score(grade: int) -> void:
+	if grade == Judgement.Grade.MISS:
+		combo = 0
+	else:
+		combo += 1
+	var weight: float = SCORE_WEIGHT.get(grade, 0.0)
+	var combo_mult: float = 1.0 + minf(float(combo), 100.0) * 0.005
+	var fever_mult: float = get_score_multiplier()
+	var gain: int = int(roundf(float(BASE_SCORE) * weight * combo_mult * fever_mult))
+	score += gain
+	score_changed.emit(score, combo)
