@@ -1,5 +1,7 @@
 extends Control
 
+const SafeArea := preload("res://scripts/safe_area.gd")
+
 @onready var bg: TextureRect = $"BackgroundLayer/BG"
 @onready var logo_image: TextureRect = $"TitleLayer/LogoImage"
 @onready var logo_pill: Panel = $"TitleLayer/LogoPill"
@@ -36,11 +38,19 @@ func _ready() -> void:
 	normal_btn.pressed.connect(_select_diff.bind("normal"))
 	hard_btn.pressed.connect(_select_diff.bind("hard"))
 	_update_diff_buttons()
+	_apply_safe_area()
 
 func _show_fallback_logo() -> void:
 	logo_image.visible = false
 	logo_pill.visible = true
 	logo_text.visible = true
+
+func _apply_safe_area() -> void:
+	var insets: Dictionary = SafeArea.get_insets()
+	# Push bottom glass panel up by safe bottom inset
+	var glass: Panel = $"BottomUILayer/BottomGlass"
+	glass.offset_bottom -= insets["bottom"]
+	glass.offset_top -= insets["bottom"]
 
 func _select_diff(diff: String) -> void:
 	_selected_diff = diff

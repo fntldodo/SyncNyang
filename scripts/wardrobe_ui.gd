@@ -1,6 +1,7 @@
 extends Control
 
 const ItemsDB := preload("res://scripts/items_db.gd")
+const SafeArea := preload("res://scripts/safe_area.gd")
 
 @onready var back_btn: Button = $"Panel/BackBtn"
 @onready var coins_label: Label = $"Panel/CoinsLabel"
@@ -30,7 +31,14 @@ func _ready() -> void:
 		btn.pressed.connect(_on_cat_selected.bind(cat))
 		cat_row.add_child(btn)
 
+	_apply_safe_area()
 	_refresh_ui()
+
+func _apply_safe_area() -> void:
+	var insets: Dictionary = SafeArea.get_insets()
+	var panel: Control = $"Panel"
+	panel.offset_top += insets["top"]
+	panel.offset_bottom -= insets["bottom"]
 
 func _on_back() -> void:
 	SceneRouter.back()

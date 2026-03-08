@@ -1,6 +1,7 @@
 extends Control
 
 const RewardSystem := preload("res://scripts/reward_system.gd")
+const SafeArea := preload("res://scripts/safe_area.gd")
 
 ## TICKET 1 — existing buttons
 @onready var retry_btn: Button = $"Panel/BtnRow/RetryBtn"
@@ -26,7 +27,18 @@ func _ready() -> void:
 	_reward_system = RewardSystem.new()
 	reward_label.text = ""
 
+	_apply_safe_area()
 	_display_summary()
+
+func _apply_safe_area() -> void:
+	var insets: Dictionary = SafeArea.get_insets()
+	# Nudge the center card/panel to avoid notch and nav bar
+	var card: Control = $"Card"
+	var panel: Control = $"Panel"
+	card.offset_top += insets["top"] * 0.5
+	card.offset_bottom -= insets["bottom"] * 0.5
+	panel.offset_top += insets["top"] * 0.5
+	panel.offset_bottom -= insets["bottom"] * 0.5
 
 func _display_summary() -> void:
 	var s: Dictionary = SaveData.last_run_summary

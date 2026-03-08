@@ -1,5 +1,7 @@
 extends Control
 
+const SafeArea := preload("res://scripts/safe_area.gd")
+
 ## Cutscene Controller — 6-image sequential viewer, no text.
 ## Tap to advance, BACK to Boot, SKIP to Game, 0.25s fade transitions.
 
@@ -36,11 +38,17 @@ func _ready() -> void:
 	skip_btn.pressed.connect(_on_skip)
 	tap_area.gui_input.connect(_on_tap_input)
 	_show_cut(0)
+	_apply_safe_area()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		_on_back()
+
+func _apply_safe_area() -> void:
+	var insets: Dictionary = SafeArea.get_insets()
+	var top_overlay: Control = $"TopOverlay"
+	top_overlay.offset_top += insets["top"]
 
 func _on_tap_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:

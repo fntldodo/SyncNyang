@@ -40,10 +40,8 @@
         },
         {
             "t": 4.2,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "\\"
+            "type": "tap",
+            "lane": 0
         },
         {
             "t": 4.7,
@@ -58,10 +56,8 @@
         },
         {
             "t": 6.7,
-            "type": "scratch",
-            "lane": 1,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 1
         },
         {
             "t": 7.2,
@@ -81,10 +77,8 @@
         },
         {
             "t": 9.5,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 0
         },
         {
             "t": 10.0,
@@ -104,10 +98,8 @@
         },
         {
             "t": 12.5,
-            "type": "scratch",
-            "lane": 1,
-            "span": 2,
-            "diag": "\\"
+            "type": "tap",
+            "lane": 1
         },
         {
             "t": 13.0,
@@ -127,10 +119,8 @@
         },
         {
             "t": 15.2,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "\\"
+            "type": "tap",
+            "lane": 0
         },
         {
             "t": 15.7,
@@ -145,10 +135,8 @@
         },
         {
             "t": 17.7,
-            "type": "scratch",
-            "lane": 1,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 1
         },
         {
             "t": 18.2,
@@ -168,10 +156,8 @@
         },
         {
             "t": 20.4,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 0
         },
         {
             "t": 20.9,
@@ -185,10 +171,8 @@
         },
         {
             "t": 21.9,
-            "type": "scratch",
-            "lane": 1,
-            "span": 2,
-            "diag": "\\"
+            "type": "tap",
+            "lane": 1
         },
         {
             "t": 22.4,
@@ -203,10 +187,8 @@
         },
         {
             "t": 24.3,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 2
         },
         {
             "t": 24.8,

@@ -40,10 +40,8 @@
         },
         {
             "t": 5.7,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "\\"
+            "type": "tap",
+            "lane": 2
         },
         {
             "t": 6.4,
@@ -78,10 +76,8 @@
         },
         {
             "t": 11.6,
-            "type": "scratch",
-            "lane": 1,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 1
         },
         {
             "t": 12.3,
@@ -100,10 +96,8 @@
         },
         {
             "t": 14.4,
-            "type": "scratch",
-            "lane": 0,
-            "span": 2,
-            "diag": "/"
+            "type": "tap",
+            "lane": 0
         },
         {
             "t": 15.1,
@@ -138,10 +132,8 @@
         },
         {
             "t": 20.3,
-            "type": "scratch",
-            "lane": 1,
-            "span": 2,
-            "diag": "\\"
+            "type": "tap",
+            "lane": 1
         },
         {
             "t": 20.9,

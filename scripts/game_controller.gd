@@ -9,6 +9,7 @@ signal gauge_changed(value: float)
 signal fever_started()
 signal fever_ended()
 signal score_changed(score: int, combo: int)
+signal fever_door_opened(bonus: int)
 
 const Judgement := preload("res://scripts/judgement.gd")
 const ChartLoader := preload("res://scripts/chart_loader.gd")
@@ -65,6 +66,14 @@ const BASE_SCORE := 100
 const SCORE_WEIGHT := {0: 1.0, 1: 0.9, 2: 0.75, 3: 0.5, 4: 0.0}  # PERFECT..MISS
 var score: int = 0
 var combo: int = 0
+var fever_scratch_score: int = 0
+const FEVER_SCRATCH_BONUS := 50
+const DOOR_OPEN_BONUS := 500
+const DOORS_OPEN_BONUS := 500
+var _fever_scratch_count: int = 0
+var _fever_door_opened: bool = false
+var _fever_time_offset: float = 0.0
+var _fever_start_real_sec: float = 0.0
 
 func start_run(diff: String = "normal") -> void:
 	var chart: Dictionary = ChartLoader.load_chart("track01", diff)
@@ -73,12 +82,15 @@ func start_run(diff: String = "normal") -> void:
 	_spawn_index = 0
 	_clear_active_notes()
 	_reset_counters()
+	fever_scratch_score = 0
 	gauge = 0.0
 	is_fever = false
 	_fever_end_time = 0.0
 	_fever_count = 0
 	cursor_lane = 1
 	cursor_holding = false
+	_fever_time_offset = 0.0
+	_fever_start_real_sec = 0.0
 	_start_ticks = Time.get_ticks_msec()
 	_running = true
 
@@ -87,7 +99,12 @@ func stop_run() -> void:
 	_clear_active_notes()
 
 func now_sec() -> float:
-	return (Time.get_ticks_msec() - _start_ticks) / 1000.0
+	var real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
+	# If we are currently IN fever, pretend time is stopped at precisely the moment fever started.
+	# If NOT in fever, subtract the total time we ever spent in fever.
+	if is_fever:
+		return _fever_start_real_sec - _fever_time_offset
+	return real_sec - _fever_time_offset
 
 func is_running() -> bool:
 	return _running
@@ -100,7 +117,11 @@ func process_update() -> void:
 		return
 	var t: float = now_sec()
 	_spawn_pending_notes(t)
-	_update_active_notes(t)
+	# During fever, freeze note positions (don't update movement)
+	if not is_fever:
+		_update_active_notes(t)
+	else:
+		_update_active_notes_fever_frozen(t)
 	_update_fever(t)
 	_check_run_complete()
 
@@ -109,8 +130,23 @@ func process_update() -> void:
 func handle_tap(lane: int) -> int:
 	return _judge_nearest("tap", lane, -1)
 
-func handle_scratch(lane_pair: int) -> int:
-	return _judge_nearest("scratch", lane_pair, -1)
+## Fever-only free scratch: each swipe adds a scratch to the door
+func handle_fever_scratch() -> int:
+	if not _running or not is_fever:
+		return 0
+	_fever_scratch_count += 1
+	fever_scratch_score += FEVER_SCRATCH_BONUS
+	score += FEVER_SCRATCH_BONUS
+	score_changed.emit(score, combo)
+	print("[DEBUG] Fever scratch! Count: ", _fever_scratch_count)
+	return _fever_scratch_count
+
+## Called by game_ui when fever door is opened
+func award_door_bonus() -> void:
+	score += DOOR_OPEN_BONUS
+	_fever_door_opened = true
+	score_changed.emit(score, combo)
+	fever_door_opened.emit(DOOR_OPEN_BONUS)
 
 ## TICKET 8.2+8.3: press on a lane → start a 꾹꾹 hold (with late latch grace)
 func handle_moving_press(lane: int) -> void:
@@ -189,7 +225,8 @@ func get_run_summary() -> Dictionary:
 		rank = "B"
 	return {"rank": rank, "perfect": _count_perfect, "excellent": _count_excellent,
 		"good": _count_good, "soso": _count_soso, "miss": _count_miss, "total": total,
-		"score": score, "combo_max": combo, "fever_count": _fever_count}
+		"score": score, "combo_max": combo, "fever_count": _fever_count,
+		"fever_scratch_score": fever_scratch_score}
 
 ## ---- Internal ----
 
@@ -270,6 +307,15 @@ func _update_active_notes(t: float) -> void:
 		_move_note_view(entry, t)
 	_remove_indices(to_remove)
 
+## Fever-frozen variant: notes stay put, no auto-miss, no movement
+func _update_active_notes_fever_frozen(_t: float) -> void:
+	# During fever, notes are frozen — don't move them, don't auto-miss
+	# Only update moving note visuals if they were in holding state
+	for entry in _active_notes:
+		if entry.get("judged", false):
+			continue
+		# Keep views where they are (no _move_note_view)
+
 func _miss_moving(entry: Dictionary) -> void:
 	entry["judged"] = true
 	entry["m_state"] = "ended"
@@ -340,7 +386,8 @@ func _judge_nearest(input_type: String, input_lane: int, _unused: int) -> int:
 		if int(candidate.get("lane", -1)) != input_lane:
 			continue
 		var c_delta: float = absf((t - float(candidate.get("t", 0.0))) * 1000.0)
-		if c_delta > 130.0:
+		# Widen the valid hit window for candidates (was 130ms, now 200ms) to allow early/late "SO-SO" or slightly worse hits on mobile
+		if c_delta > 200.0:
 			continue
 		if _is_note_in_zone(candidate, t):
 			if c_delta < in_zone_abs:
@@ -450,15 +497,27 @@ func _update_gauge(grade: int) -> void:
 func _start_fever() -> void:
 	is_fever = true
 	gauge = 0.0
+	# Track real time when this fever started so we can freeze the game clock
+	var current_real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
+	_fever_start_real_sec = current_real_sec
+	
 	_fever_end_time = now_sec() + FEVER_DURATION
+	_fever_scratch_count = 0
+	_fever_door_opened = false
 	_fever_count += 1
 	gauge_changed.emit(gauge)
 	fever_started.emit()
 
 func _update_fever(t: float) -> void:
-	if is_fever and t >= _fever_end_time:
-		is_fever = false
-		fever_ended.emit()
+	if is_fever:
+		var current_real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
+		var elapsed_fever: float = current_real_sec - _fever_start_real_sec
+		# Fever ends strictly on real-world elapsed time
+		if elapsed_fever >= FEVER_DURATION:
+			# Bake the paused duration into the offset so time resumes smoothly from where it froze
+			_fever_time_offset += elapsed_fever
+			is_fever = false
+			fever_ended.emit()
 
 func get_score_multiplier() -> float:
 	return FEVER_MULTIPLIER if is_fever else 1.0

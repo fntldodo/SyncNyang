@@ -21,11 +21,16 @@ const STRIP_WIDTH := 68.0
 
 const DEBUG_HINT := true
 
-# CAN colors
+# CAN colors (Tap)
 const CAN_BODY := Color(0.95, 0.72, 0.55)
 const CAN_TOP := Color(0.85, 0.62, 0.45)
 const CAN_OUTLINE := Color(0.5, 0.35, 0.25)
 const CAN_LABEL := Color(1.0, 0.95, 0.85)
+
+# CAN SCRATCH colors (Scratch)
+const CAN_SCRATCH_BODY := Color(0.55, 0.75, 0.95)
+const CAN_SCRATCH_TOP := Color(0.45, 0.65, 0.85)
+const CAN_SCRATCH_LABEL := Color(0.85, 0.95, 1.0)
 
 # FISH colors
 const FISH_BODY := Color(0.45, 0.72, 0.95, 0.95)
@@ -65,9 +70,10 @@ func setup(type: String, diag_dir: String = "\\", note_lane: int = 0,
 	note_len = len_sec
 	if type == "scratch":
 		lane_pair = clampi(note_lane, 0, 1)
-		custom_minimum_size = SCRATCH_SIZE
-		size = SCRATCH_SIZE
-		rotation_degrees = -15.0 if diag == "/" else 15.0
+		custom_minimum_size = NOTE_SIZE
+		size = NOTE_SIZE
+		# Increased tilt to 25 degrees to make it look like a very obvious diagonal requirement
+		rotation_degrees = -25.0 if diag == "/" else 25.0
 	elif type == "moving":
 		lane_pair = -1
 		var strip_h: float = (len_sec / maxf(approach_time, 0.1)) * travel_dist
@@ -86,30 +92,45 @@ func setup(type: String, diag_dir: String = "\\", note_lane: int = 0,
 
 func _draw() -> void:
 	if note_type == "tap":
-		_draw_can()
+		_draw_can(false)
 	elif note_type == "moving":
 		_draw_churu_strip()
 	else:
-		_draw_fish()
+		_draw_can(true) # Draw a Can for scratch as well, but with different colors
 		_draw_debug_hint()
 
-## ---- CAN (tap note) ----
+## ---- CAN (tap & scratch note) ----
 
-func _draw_can() -> void:
+func _draw_can(is_scratch: bool) -> void:
+	var body_col = CAN_SCRATCH_BODY if is_scratch else CAN_BODY
+	var top_col = CAN_SCRATCH_TOP if is_scratch else CAN_TOP
+	var label_col = CAN_SCRATCH_LABEL if is_scratch else CAN_LABEL
+	var out_col = CAN_OUTLINE
+	
 	var w: float = size.x
 	var h: float = size.y
 	var cx: float = w * 0.5
 	var mx: float = w * 0.12
 	var body_rect := Rect2(mx, h * 0.25, w - mx * 2, h * 0.69)
-	draw_rect(body_rect, CAN_BODY)
-	draw_rect(Rect2(mx + 2, h * 0.4, w - mx * 2 - 4, h * 0.18), CAN_LABEL)
+	draw_rect(body_rect, body_col)
+	draw_rect(Rect2(mx + 2, h * 0.4, w - mx * 2 - 4, h * 0.18), label_col)
 	var top_rect := Rect2(mx + 4, h * 0.17, w - mx * 2 - 8, h * 0.1)
-	draw_rect(top_rect, CAN_TOP)
-	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.05, CAN_OUTLINE)
-	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.03, CAN_TOP)
-	draw_rect(body_rect, CAN_OUTLINE, false, 1.0)
-	draw_rect(top_rect, CAN_OUTLINE, false, 0.8)
-	_draw_tiny_paw(Vector2(cx, h * 0.52), CAN_OUTLINE)
+	draw_rect(top_rect, top_col)
+	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.05, out_col)
+	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.03, top_col)
+	draw_rect(body_rect, out_col, false, 1.0)
+	draw_rect(top_rect, out_col, false, 0.8)
+	
+	if is_scratch:
+		# Draw bright directional arrows on the label
+		var arrow_col := Color(1.0, 0.95, 0.2) # Bright yellow
+		var text_pos := Vector2(cx, h * 0.55)
+		var arrow_txt := ">>" if diag == "\\" else "<<"
+		draw_string(ThemeDB.fallback_font, text_pos + Vector2(-15, 0), arrow_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 32, arrow_col)
+		# Draw subtle shadow for visibility
+		draw_string(ThemeDB.fallback_font, text_pos + Vector2(-14, 2), arrow_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(0,0,0,0.3))
+	else:
+		_draw_tiny_paw(Vector2(cx, h * 0.52), out_col)
 
 ## ---- FISH (scratch note) ----
 
