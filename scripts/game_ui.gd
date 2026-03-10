@@ -35,6 +35,9 @@ var _last_action: String = "tap"
 var _touch_start_pos: Vector2 = Vector2.ZERO
 var _touch_active: bool = false
 var _last_drag_pos: Vector2 = Vector2.ZERO  ## For continuous fever scratching
+var _last_scratch_frame: int = -1  ## Frame dedup to prevent emulated event double-fire
+var _last_scratch_time_ms: int = -999999  ## Time dedup (ms) to prevent rapid duplicate events
+const SCRATCH_MIN_INTERVAL_MS := 60  ## Minimum ms between scratches
 
 ## Hold state (꾹꾹)
 var _held_lane: int = 1
@@ -48,6 +51,14 @@ var _prev_e_held: bool = false
 ## Debug keyboard
 const DEBUG_KEYS := true
 const COMBO_WINDOW_MS := 120.0
+
+## Calibration UI (set to true on real device to adjust)
+const DEBUG_CALIBRATE := true
+
+## Event Investigation Probe
+const DEBUG_EVENT_PROBE := true
+var _probe_frame: int = -1
+var _probe_count: int = 0
 var _last_key: int = -1
 var _last_key_time_ms: float = 0.0
 
@@ -83,8 +94,16 @@ var _fever_door: Control = null   ## FeverDoor instance during fever
 
 var _run_cancelled: bool = false
 
+## Calibration UI elements
+var _calib_label: Label = null
+var _calib_minus_btn: Button = null
+var _calib_plus_btn: Button = null
+
 
 func _ready() -> void:
+	# Disable accumulated input for responsive multitouch on real devices
+	Input.set_use_accumulated_input(false)
+	
 	back_btn.pressed.connect(_on_back)
 	next_btn.pressed.connect(_on_next)
 	game_controller.judgement_emitted.connect(_on_judgement)
@@ -104,6 +123,8 @@ func _ready() -> void:
 	_create_gauge_bar()
 	_create_fever_overlay()
 	_create_debug_lane_label()
+	if DEBUG_CALIBRATE:
+		_create_calibration_ui()
 	_apply_safe_area()
 	_update_cursor_visual()
 	_current_diff = SceneRouter.selected_difficulty
@@ -135,8 +156,9 @@ func _compute_lane_geometry() -> void:
 func _get_lane_from_x(x: float) -> int:
 	if _lane_width <= 0:
 		return 1
-	# x is in viewport coordinates (from gui_input or unhandled_input)
-	return clampi(int(x / _lane_width), 0, NUM_LANES - 1)
+	# Subtract viewport rect origin for devices with notch/letterboxing offset
+	var rect_x: float = get_viewport().get_visible_rect().position.x
+	return clampi(int((x - rect_x) / _lane_width), 0, NUM_LANES - 1)
 
 ## ---- Safe Area ----
 
@@ -185,6 +207,63 @@ func _debug_show_lane(lane: int) -> void:
 	_debug_lane_label.text = "LANE: %d" % lane
 	# Flash the hit box
 	_flash_hit_box(lane)
+
+## ---- Calibration UI (DEBUG_CALIBRATE only) ----
+
+func _create_calibration_ui() -> void:
+	var vw: float = get_viewport().get_visible_rect().size.x
+	
+	# Container at top-right
+	var container := HBoxContainer.new()
+	container.position = Vector2(vw - 420, 8)
+	container.size = Vector2(400, 50)
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(container)
+	
+	# -10 button
+	_calib_minus_btn = Button.new()
+	_calib_minus_btn.text = "-10ms"
+	_calib_minus_btn.custom_minimum_size = Vector2(90, 44)
+	_calib_minus_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	_calib_minus_btn.pressed.connect(_on_calib_minus)
+	container.add_child(_calib_minus_btn)
+	
+	# Offset label
+	_calib_label = Label.new()
+	_calib_label.text = "OFFSET: 0ms"
+	_calib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_calib_label.custom_minimum_size = Vector2(160, 44)
+	_calib_label.add_theme_font_size_override("font_size", 22)
+	_calib_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.6))
+	_calib_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(_calib_label)
+	
+	# +10 button
+	_calib_plus_btn = Button.new()
+	_calib_plus_btn.text = "+10ms"
+	_calib_plus_btn.custom_minimum_size = Vector2(90, 44)
+	_calib_plus_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	_calib_plus_btn.pressed.connect(_on_calib_plus)
+	container.add_child(_calib_plus_btn)
+	
+	_update_calib_label()
+
+func _on_calib_minus() -> void:
+	SaveData.input_offset_ms = clampf(SaveData.input_offset_ms - 10.0, -200.0, 200.0)
+	game_controller.input_offset_ms = SaveData.input_offset_ms
+	SaveData.save_data()
+	_update_calib_label()
+
+func _on_calib_plus() -> void:
+	SaveData.input_offset_ms = clampf(SaveData.input_offset_ms + 10.0, -200.0, 200.0)
+	game_controller.input_offset_ms = SaveData.input_offset_ms
+	SaveData.save_data()
+	_update_calib_label()
+
+func _update_calib_label() -> void:
+	if _calib_label:
+		var ms: int = int(SaveData.input_offset_ms)
+		_calib_label.text = "OFFSET: %dms" % ms
 
 func _get_scratch_pair_from_x(x: float) -> int:
 	var mid: float = _lane_centers[1] if _lane_centers.size() > 1 else 540.0
@@ -366,7 +445,6 @@ func _start_rainbow_cycle() -> void:
 
 func _bind_fever_door() -> void:
 	var nodes := get_tree().get_nodes_in_group("fever_door")
-	print("[DEBUG] 'fever_door' group node count in SceneTree: ", nodes.size())
 	
 	if nodes.is_empty():
 		push_warning("[GameUI] No FeverDoor found in 'fever_door' group!")
@@ -377,7 +455,6 @@ func _bind_fever_door() -> void:
 			nodes[i].queue_free()
 	
 	_fever_door = nodes[0]
-	print("[DEBUG] Bound _fever_door: ID=", _fever_door.get_instance_id(), " Path=", _fever_door.get_path())
 	
 	# Connect signal safely
 	if not _fever_door.door_opened.is_connected(_on_fever_door_opened):
@@ -411,18 +488,11 @@ func _spawn_fever_door() -> void:
 	tw.tween_property(_fever_door, "position:y", target_y, 0.08)
 
 func _safe_add_scratch(pos: Vector2) -> void:
-	print("[DEBUG] _safe_add_scratch() IN.  _fever_door is null? ", _fever_door == null)
 	if not is_instance_valid(_fever_door):
-		print("[DEBUG] _fever_door invalid. Rebinding...")
 		_bind_fever_door()
 	
-	print("[DEBUG] is_instance_valid(_fever_door)? ", is_instance_valid(_fever_door))
-	
 	if _fever_door and is_instance_valid(_fever_door):
-		print("[DEBUG] Dispatching to door -> ID: ", _fever_door.get_instance_id(), " | Path: ", _fever_door.get_path(), " | Current Progress: ", _fever_door.get("_progress"))
 		_fever_door.add_scratch(pos)
-	else:
-		print("[DEBUG] FAILED to dispatch. _fever_door is still invalid!")
 
 func _on_fever_door_opened() -> void:
 	game_controller.award_door_bonus()
@@ -502,17 +572,27 @@ func _start_chart(diff: String) -> void:
 	var seq: Array = ["3", "2", "1", "START!"]
 	for i in range(seq.size()):
 		var text: String = str(seq[i])
-		get_tree().create_timer(i * 1.0).timeout.connect(func():
+		var callable: Callable = func(t_val: String):
 			if _run_cancelled or not is_instance_valid(lbl): return
-			lbl.text = text
+			
+			# Kill previous tween to prevent alpha interference (e.g. 1.0s fade finishing exactly when next number starts)
+			if lbl.has_meta("tw"):
+				var old_tw: Tween = lbl.get_meta("tw")
+				if old_tw and old_tw.is_valid():
+					old_tw.kill()
+					
+			lbl.text = t_val
 			lbl.scale = Vector2(0.3, 0.3)
 			lbl.modulate.a = 1.0
+			
 			var tw := create_tween()
+			lbl.set_meta("tw", tw)
 			tw.tween_property(lbl, "scale", Vector2(1.2, 1.2), 0.15).set_ease(Tween.EASE_OUT)
 			tw.tween_property(lbl, "scale", Vector2(1.0, 1.0), 0.1)
 			tw.tween_interval(0.5)
 			tw.tween_property(lbl, "modulate:a", 0.0, 0.25)
-		)
+			
+		get_tree().create_timer(i * 1.0).timeout.connect(callable.bind(text))
 	
 	get_tree().create_timer(seq.size() * 1.0).timeout.connect(func():
 		if is_instance_valid(lbl):
@@ -542,42 +622,94 @@ func _on_run_finished() -> void:
 ## ---- Input ----
 
 func _input(event: InputEvent) -> void:
+	if DEBUG_EVENT_PROBE and game_controller.is_fever:
+		var fr: int = Engine.get_process_frames()
+		var log_it := false
+		
+		# Only log MouseMotion if a button is actually pressed (spam reduction)
+		if event is InputEventMouseMotion:
+			if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+				log_it = true
+		else:
+			log_it = true
+			
+		if log_it:
+			if fr != _probe_frame:
+				_probe_frame = fr
+				_probe_count = 0
+			_probe_count += 1
+			
+			var cls: String = event.get_class()
+			var msg: String = "EVENT: %s frame=%d n=%d" % [cls, fr, _probe_count]
+			
+			if event is InputEventScreenTouch:
+				msg += " idx=%d pressed=%s pos=%s" % [event.index, str(event.pressed), str(event.position)]
+			elif event is InputEventScreenDrag:
+				msg += " idx=%d pos=%s" % [event.index, str(event.position)]
+			elif event is InputEventMouseButton:
+				msg += " btn=%d pressed=%s pos=%s" % [event.button_index, str(event.pressed), str(event.position)]
+			elif event is InputEventMouseMotion:
+				msg += " pos=%s LMB=true" % str(event.position)
+			
+			print(msg)
+
 	if not game_controller.is_fever or _fever_door == null or not is_instance_valid(_fever_door):
 		return
 
-	# Catch all touch/mouse globally during fever to avoid Control node swallowing
+	# Handle both ScreenTouch/ScreenDrag (real device) AND MouseButton/MouseMotion (editor).
+	# When "Emulate Touch From Mouse" is ON, both fire for the same click — the frame
+	# dedup guard (_last_scratch_frame) prevents double-counting.
 	var pos: Vector2 = Vector2.ZERO
-	var is_click := false
+	var is_press := false
 	var is_drag := false
 
 	if event is InputEventScreenTouch:
 		pos = event.position
-		is_click = event.pressed
+		is_press = event.pressed
 	elif event is InputEventScreenDrag:
 		pos = event.position
 		is_drag = true
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		pos = event.position
-		is_click = event.pressed
+		is_press = event.pressed
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		pos = event.position
 		is_drag = true
 
-	if pos != Vector2.ZERO:
-		var should_scratch := false
-		if is_click:
+	if pos == Vector2.ZERO:
+		return
+
+	# Time + frame dedup: prevent emulated/duplicate events from double-counting
+	var current_frame: int = Engine.get_process_frames()
+	var now_ms: int = Time.get_ticks_msec()
+	if current_frame == _last_scratch_frame:
+		return
+	if (now_ms - _last_scratch_time_ms) < SCRATCH_MIN_INTERVAL_MS:
+		return
+
+	var should_scratch := false
+	if is_press:
+		# Finger/click down: first scratch + record anchor for drags
+		_last_drag_pos = pos
+		should_scratch = true
+	elif is_drag:
+		# Drag: scratch every 5px of movement
+		if pos.distance_to(_last_drag_pos) >= 5.0:
 			_last_drag_pos = pos
 			should_scratch = true
-		elif is_drag:
-			if pos.distance_to(_last_drag_pos) >= 5.0:
-				_last_drag_pos = pos
-				should_scratch = true
 
-		if should_scratch:
-			var count: int = game_controller.handle_fever_scratch()
-			if count > 0:
-				_safe_add_scratch(pos)
-			get_viewport().set_input_as_handled()
+	if should_scratch:
+		_last_scratch_frame = current_frame
+		_last_scratch_time_ms = now_ms
+		# (a) Controller increments and returns authoritative count
+		var count: int = game_controller.handle_fever_scratch()
+		if count > 0:
+			# (b) Visual scratch marks
+			_safe_add_scratch(pos)
+			# (c) Sync UI count from controller (single source of truth)
+			if _fever_door and is_instance_valid(_fever_door):
+				_fever_door.set_count(count)
+		get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
@@ -593,7 +725,13 @@ func _on_tap_area_input(event: InputEvent) -> void:
 	# ---- NORMAL MODE ONLY (Fever handled by _input) ----
 	if game_controller.is_fever:
 		return
-	# Touch events
+	# Touch events (real device)
+	if event is InputEventScreenTouch:
+		_handle_touch(event.position, event.pressed)
+		return
+	if event is InputEventScreenDrag:
+		_handle_drag(event.position)
+		return
 	# Mouse events (editor testing)
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		_handle_touch(event.position, event.pressed)
@@ -627,13 +765,12 @@ func _update_held_lane_from_x(x: float) -> void:
 
 func _classify_and_dispatch(end_pos: Vector2) -> void:
 	var dist: float = end_pos.distance_to(_touch_start_pos)
-	# Omni-directional swipe: fever door scratch or regular tap
+	# During fever, scratches are handled exclusively by _input() — don't double-fire here
+	if game_controller.is_fever:
+		return
+	# Omni-directional swipe: regular tap
 	if dist >= _swipe_threshold:
 		_last_action = "scratch"
-		var count: int = game_controller.handle_fever_scratch()
-		if count > 0:
-			_safe_add_scratch(end_pos)
-			_show_fever_scratch_fx(end_pos, 50)
 	else:
 		_last_action = "tap"
 		game_controller.handle_tap(_get_lane_from_x(_touch_start_pos.x))
@@ -744,6 +881,8 @@ func _handle_debug_key(keycode: int) -> void:
 			if bonus > 0:
 				var scratch_pos := Vector2(get_viewport().get_visible_rect().size.x * 0.5, hit_line.position.y)
 				_safe_add_scratch(scratch_pos)
+				if _fever_door and is_instance_valid(_fever_door):
+					_fever_door.set_count(bonus)
 				_show_fever_scratch_fx(scratch_pos, bonus)
 			_last_key = -1
 			return

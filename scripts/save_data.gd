@@ -14,6 +14,9 @@ var equipped: Dictionary = {
 	"pedicure": "none",
 }
 
+## Audio latency calibration (ms). Positive = user hears late, shifts judgement earlier.
+var input_offset_ms: float = 0.0
+
 ## Transient: last run summary from GameController (not saved to file)
 var last_run_summary: Dictionary = {}
 
@@ -35,6 +38,7 @@ func load_data() -> void:
 		return
 	var data: Dictionary = json.data
 	coins = int(data.get("coins", 0))
+	input_offset_ms = float(data.get("input_offset_ms", 0.0))
 	var inv_raw: Dictionary = data.get("inventory", {})
 	inventory.clear()
 	for key in inv_raw:
@@ -47,6 +51,7 @@ func load_data() -> void:
 func save_data() -> void:
 	var data: Dictionary = {
 		"coins": coins,
+		"input_offset_ms": input_offset_ms,
 		"inventory": inventory,
 		"equipped": equipped,
 	}

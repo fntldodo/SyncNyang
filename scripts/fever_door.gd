@@ -58,15 +58,22 @@ func _generate_stars() -> void:
 			"r": randf_range(1.0, 2.5), "type": "sm"
 		})
 
-func add_scratch(touch_pos: Vector2) -> void:
-	print("[DEBUG] FeverDoor.add_scratch() entered. is_open=", is_open)
+## Set the authoritative count from game_controller (single source of truth).
+func set_count(count: int) -> void:
 	if is_open:
 		return
-	scratch_count += 1
+	scratch_count = clampi(count, 0, OPEN_THRESHOLD)
 	_progress = clampf(float(scratch_count) / float(OPEN_THRESHOLD), 0.0, 1.0)
 	_shake_amount = 15.0
-	_flash = 1.0  # Bright flash!
-	print("[DEBUG] FeverDoor scratch_count updated to: ", scratch_count, " progress: ", _progress)
+	_flash = 1.0
+	if scratch_count >= OPEN_THRESHOLD:
+		_open_door()
+	queue_redraw()
+
+## Visual-only: adds claw mark lines at the touch position (no count change).
+func add_scratch(touch_pos: Vector2) -> void:
+	if is_open:
+		return
 
 	var local_pos: Vector2 = touch_pos - global_position
 	local_pos.x = clampf(local_pos.x, 20, size.x - 20)
@@ -82,9 +89,6 @@ func add_scratch(touch_pos: Vector2) -> void:
 			"pos": claw_pos, "angle": base_angle,
 			"len": claw_len, "depth": randf_range(0.6, 1.0)
 		})
-
-	if scratch_count >= OPEN_THRESHOLD:
-		_open_door()
 	queue_redraw()
 
 func _open_door() -> void:

@@ -19,6 +19,9 @@ const DEBUG := false
 const NUM_LANES := 3
 const MISS_WINDOW_SEC := 0.13
 
+## Audio latency offset (loaded from SaveData at start_run)
+var input_offset_ms: float = 0.0
+
 ## Chart data
 var _chart_notes: Array = []
 var _approach_time: float = 1.2
@@ -69,11 +72,13 @@ var combo: int = 0
 var fever_scratch_score: int = 0
 const FEVER_SCRATCH_BONUS := 50
 const DOOR_OPEN_BONUS := 500
-const DOORS_OPEN_BONUS := 500
 var _fever_scratch_count: int = 0
 var _fever_door_opened: bool = false
 var _fever_time_offset: float = 0.0
 var _fever_start_real_sec: float = 0.0
+var _last_fever_end_t: float = -999.0
+const DEBUG_FEVER_RESUME := true
+const RESUME_BOOST_SEC := 1.0
 
 func start_run(diff: String = "normal") -> void:
 	var chart: Dictionary = ChartLoader.load_chart("track01", diff)
@@ -91,6 +96,7 @@ func start_run(diff: String = "normal") -> void:
 	cursor_holding = false
 	_fever_time_offset = 0.0
 	_fever_start_real_sec = 0.0
+	input_offset_ms = SaveData.input_offset_ms
 	_start_ticks = Time.get_ticks_msec()
 	_running = true
 
@@ -138,7 +144,6 @@ func handle_fever_scratch() -> int:
 	fever_scratch_score += FEVER_SCRATCH_BONUS
 	score += FEVER_SCRATCH_BONUS
 	score_changed.emit(score, combo)
-	print("[DEBUG] Fever scratch! Count: ", _fever_scratch_count)
 	return _fever_scratch_count
 
 ## Called by game_ui when fever door is opened
@@ -231,10 +236,15 @@ func get_run_summary() -> Dictionary:
 ## ---- Internal ----
 
 func _spawn_pending_notes(t: float) -> void:
+	var boost: float = 0.0
+	if not is_fever and (t - _last_fever_end_t) <= 1.0:
+		boost = RESUME_BOOST_SEC
+
 	while _spawn_index < _chart_notes.size():
 		var nd: Dictionary = _chart_notes[_spawn_index]
 		var note_t: float = float(nd.get("t", 0.0))
-		if note_t - _approach_time > t:
+		# Apply boost to the spawn condition so notes spawn earlier right after fever
+		if note_t - _approach_time > t + boost:
 			break
 		_spawn_note(nd)
 		_spawn_index += 1
@@ -351,7 +361,9 @@ func _move_note_view(n: Dictionary, t: float) -> void:
 		return
 	var note_t: float = float(n.get("t", 0.0))
 	var spawn_t: float = note_t - _approach_time
-	var progress: float = clampf((t - spawn_t) / _approach_time, 0.0, 1.0)
+	# Use minf instead of clampf so early-spawned notes (negative progress) 
+	# spawn naturally further up off-screen instead of clamping to the spawn line
+	var progress: float = minf((t - spawn_t) / _approach_time, 1.0)
 	var note_bottom_y: float = lerpf(spawn_y, hitline_y, progress)
 	var y: float = note_bottom_y - view.size.y
 	var x: float = _get_note_x(n) - view.size.x * 0.5
@@ -371,7 +383,9 @@ func _get_note_x(n: Dictionary) -> float:
 func _judge_nearest(input_type: String, input_lane: int, _unused: int) -> int:
 	if not _running:
 		return -1
-	var t: float = now_sec()
+	# Apply audio latency offset: positive offset_ms means user hears late,
+	# so we shift 'now' forward to compensate.
+	var t: float = now_sec() + input_offset_ms / 1000.0
 	# Collect all valid candidates within timing window
 	var in_zone_i: int = -1
 	var in_zone_abs: float = 999999.0
@@ -501,6 +515,17 @@ func _start_fever() -> void:
 	var current_real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
 	_fever_start_real_sec = current_real_sec
 	
+	# Clear all active notes so the screen is clean for the fever door
+	_clear_active_notes()
+	# Rewind spawn index so notes after frozen time can re-spawn after fever ends
+	var frozen_t: float = now_sec()
+	_spawn_index = 0
+	for i in range(_chart_notes.size()):
+		var note_t: float = float(_chart_notes[i].get("t", 0.0))
+		if note_t - _approach_time > frozen_t:
+			_spawn_index = i
+			break
+	
 	_fever_end_time = now_sec() + FEVER_DURATION
 	_fever_scratch_count = 0
 	_fever_door_opened = false
@@ -512,11 +537,19 @@ func _update_fever(t: float) -> void:
 	if is_fever:
 		var current_real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
 		var elapsed_fever: float = current_real_sec - _fever_start_real_sec
-		# Fever ends strictly on real-world elapsed time
 		if elapsed_fever >= FEVER_DURATION:
 			# Bake the paused duration into the offset so time resumes smoothly from where it froze
 			_fever_time_offset += elapsed_fever
 			is_fever = false
+			_last_fever_end_t = now_sec()
+			
+			if DEBUG_FEVER_RESUME:
+				var next_note_t: float = -1.0
+				if _spawn_index < _chart_notes.size():
+					next_note_t = float(_chart_notes[_spawn_index].get("t", 0.0))
+				var gap: float = (next_note_t - _approach_time) - _last_fever_end_t
+				print("[DEBUG FEVER] Fever ended at t=%.3f, next_note_t=%.3f, gap_to_spawn=%.3f (boost=%s)" % [_last_fever_end_t, next_note_t, gap, gap <= RESUME_BOOST_SEC])
+				
 			fever_ended.emit()
 
 func get_score_multiplier() -> float:
