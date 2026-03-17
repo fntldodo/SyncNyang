@@ -1,907 +1,384 @@
 extends Control
 
-## Game UI — input wiring, lane detection, difficulty selector.
-## DEVICE OPTIMIZATION v1: viewport-based coords, safe area, dynamic lane guides.
+## GameUI — [HOTFIX] PNG Lane Rescue & Layer Stratification.
+## Objectives: Force visibility of line1/2/3.PNG and ensure box.PNG remains stable.
+## DESIGN: 3-way split, no procedural panels, max brightness for textures.
 
 const Judgement := preload("res://scripts/judgement.gd")
 const SafeArea := preload("res://scripts/safe_area.gd")
+const LaneGeometry := preload("res://scripts/lane_geometry.gd")
+const FeverUI := preload("res://scripts/fever_ui.gd")
+const CalibrationUI := preload("res://scripts/calibration_ui.gd")
 
-## TopBar
+## Nodes
 @onready var back_btn: Button = $"TopBar/BackBtn"
 @onready var next_btn: Button = $"TopBar/NextBtn"
+@onready var hit_line: ColorRect = $HitLine
+@onready var target_zone: Control = $TargetZone
+@onready var judge_label: Label = $JudgeLabel
+@onready var game_controller: Node = $GameController
+@onready var tap_area: Panel = $TapArea
+@onready var notes_layer: Control = $NotesLayer
+@onready var cursor_indicator: ColorRect = $CursorIndicator
+@onready var score_label: Label = $"TopBar/HudCard/HudVBox/ScoreLabel"
+@onready var combo_label: Label = $"TopBar/HudCard/HudVBox/ComboLabel"
 
-## Game elements
-@onready var hit_line: ColorRect = $"HitLine"
-@onready var judge_label: Label = $"JudgeLabel"
-@onready var game_controller: Node = $"GameController"
-@onready var tap_area: Panel = $"TapArea"
-@onready var fx_layer: Node = $"FxLayer"
-@onready var notes_layer: Control = $"NotesLayer"
-@onready var cursor_indicator: ColorRect = $"CursorIndicator"
+## PNG Layer Nodes
+var lane_layer: Control = null
+var hit_layer: Control = null
+var _lane_tex: Array[TextureRect] = []
+var _hit_tex: Array[TextureRect] = []
 
-## Lane geometry
+## Visual Constants
+const COLOR_JUDGE_NEON := Color(1.0, 1.0, 1.0, 1.0) # White for max contrast now
+const COLOR_COMBO_NEON := Color(1.0, 0.9, 0.4, 1.0) # Gold
+const HIT_ZONE_HEIGHT := 80.0
 const NUM_LANES := 3
-var _lane_centers: Array = []
-var _lane_width: float = 0.0
-var _swipe_threshold: float = 40.0
 
-## State
-var _note_spawn_y: float = 200.0
-var _judge_tween: Tween = null
-var _current_diff: String = "normal"
-var _last_action: String = "tap"
+## Specialized UI Modules
+var fever_ui: Node = null
+var calib_ui: Node = null
 
-## Touch tracking (tap/scratch)
-var _touch_start_pos: Vector2 = Vector2.ZERO
-var _touch_active: bool = false
-var _last_drag_pos: Vector2 = Vector2.ZERO  ## For continuous fever scratching
-var _last_scratch_frame: int = -1  ## Frame dedup to prevent emulated event double-fire
-var _last_scratch_time_ms: int = -999999  ## Time dedup (ms) to prevent rapid duplicate events
-const SCRATCH_MIN_INTERVAL_MS := 60  ## Minimum ms between scratches
-
-## Hold state (꾹꾹)
-var _held_lane: int = 1
-var _holding: bool = false
-
-## Keyboard hold tracking via polling
-var _prev_q_held: bool = false
-var _prev_w_held: bool = false
-var _prev_e_held: bool = false
-
-## Debug keyboard
-const DEBUG_KEYS := true
-const COMBO_WINDOW_MS := 120.0
-
-## Calibration UI (set to true on real device to adjust)
-const DEBUG_CALIBRATE := true
-
-## Event Investigation Probe
-const DEBUG_EVENT_PROBE := true
-var _probe_frame: int = -1
-var _probe_count: int = 0
-var _last_key: int = -1
-var _last_key_time_ms: float = 0.0
-
-## Ring indicators (per lane)
-var _ring_nodes: Array = []
-
-## Hit box indicators (per lane)
-var _hitbox_nodes: Array = []
-const HIT_ZONE_HEIGHT := 110.0
-
-## Dynamic lane guide lines
-var _lane_guide_nodes: Array = []
-
-## Debug touch lane visualization (default OFF)
-const DEBUG_TOUCH_LANE := false
-var _debug_lane_label: Label = null
-
-## Churu gauge UI (TICKET 10)
+## Gauge Nodes
 var _gauge_bg: ColorRect = null
 var _gauge_fill: ColorRect = null
 const GAUGE_BAR_W := 700.0
 const GAUGE_BAR_H := 16.0
 
-## Fever overlay (TICKET 10)
-var _fever_overlay: ColorRect = null
-var _fever_label: Label = null
-var _fever_tween: Tween = null
-var _fever_door: Control = null   ## FeverDoor instance during fever
-
-## Score/Combo labels (TICKET 10-3 / TICKET 12: from scene HudCard)
-@onready var _score_label: Label = $"TopBar/HudCard/HudVBox/ScoreLabel"
-@onready var _combo_label: Label = $"TopBar/HudCard/HudVBox/ComboLabel"
-
+## State
+var _held_lane: int = 1
+var _holding: bool = false
 var _run_cancelled: bool = false
-
-## Calibration UI elements
-var _calib_label: Label = null
-var _calib_minus_btn: Button = null
-var _calib_plus_btn: Button = null
-
+var _ring_nodes: Array = []
+var _judge_labels: Array[Label] = []
+var _judge_pool_idx: int = 0
 
 func _ready() -> void:
-	# Disable accumulated input for responsive multitouch on real devices
 	Input.set_use_accumulated_input(false)
 	
 	back_btn.pressed.connect(_on_back)
 	next_btn.pressed.connect(_on_next)
+	get_viewport().size_changed.connect(_on_viewport_resized)
+	
 	game_controller.judgement_emitted.connect(_on_judgement)
 	game_controller.run_finished.connect(_on_run_finished)
 	game_controller.gauge_changed.connect(_on_gauge_changed)
 	game_controller.fever_started.connect(_on_fever_started)
 	game_controller.fever_ended.connect(_on_fever_ended)
 	game_controller.score_changed.connect(_on_score_changed)
-	tap_area.gui_input.connect(_on_tap_area_input)
-	judge_label.modulate.a = 0.0
+	
+	# Initial style setup (High-Density Pool: 8 Labels)
+	judge_label.hide()
+	for i in range(8):
+		var nl = judge_label.duplicate()
+		add_child(nl)
+		nl.add_theme_color_override("font_color", Color.WHITE)
+		nl.add_theme_constant_override("outline_size", 16)
+		nl.add_theme_color_override("font_outline_color", Color.BLACK)
+		nl.z_index = 100
+		nl.hide()
+		_judge_labels.append(nl)
+	
+	combo_label.add_theme_color_override("font_color", Color.WHITE)
+	combo_label.add_theme_constant_override("outline_size", 16)
+	combo_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	
+	_initialize_modules()
+	
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_late_init()
 
-	_compute_lane_geometry()
-	_setup_controller()
-	_create_lane_guides()
-	_create_ring_indicators()
-	_create_hit_boxes()
-	_create_gauge_bar()
-	_create_fever_overlay()
-	_create_debug_lane_label()
-	if DEBUG_CALIBRATE:
-		_create_calibration_ui()
+func _late_init() -> void:
+	if not is_inside_tree(): return
+	
+	# HOTFIX: Transparent TapArea
+	tap_area.self_modulate = Color(1, 1, 1, 0.0)
+	tap_area.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	
 	_apply_safe_area()
-	_update_cursor_visual()
-	_current_diff = SceneRouter.selected_difficulty
-	_start_chart(_current_diff)
+	_setup_controller()
+	_create_visual_layers()
+	_reposition_visuals()
+	_start_chart(SceneRouter.selected_difficulty)
+
+func _initialize_modules() -> void:
+	fever_ui = FeverUI.new()
+	add_child(fever_ui)
+	fever_ui.z_index = 25 # Highest layer as requested
+	fever_ui.door_opened_bonus.connect(game_controller.award_door_bonus)
+	
+	if OS.has_feature("editor"):
+		calib_ui = CalibrationUI.new()
+		add_child(calib_ui)
+		calib_ui.setup(game_controller)
+
+func _setup_controller() -> void:
+	if not is_inside_tree() or not get_viewport(): return
+	var vs := get_viewport().get_visible_rect().size
+	# Coordinate Stability
+	game_controller.lane_centers_top = LaneGeometry.get_lane_centers(vs, 0.0)
+	game_controller.lane_centers_bottom = LaneGeometry.get_lane_centers(vs, 1.0)
+	game_controller.hitline_y = hit_line.global_position.y - global_position.y
+	game_controller.notes_layer = notes_layer
+	game_controller.hit_zone_half_h = HIT_ZONE_HEIGHT * 0.5
+	game_controller.spawn_y = 120.0
+
+func _create_visual_layers() -> void:
+	# 1. Cleanup Old Layers if any
+	if lane_layer: lane_layer.queue_free(); lane_layer = null
+	if hit_layer: hit_layer.queue_free(); hit_layer = null
+	
+	# 2. Create Fresh Layer Nodes
+	lane_layer = Control.new()
+	lane_layer.name = "LaneLayer"
+	lane_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lane_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(lane_layer)
+	
+	hit_layer = Control.new()
+	hit_layer.name = "HitLayer"
+	hit_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hit_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(hit_layer)
+	
+	# 3. Layer Stratification (High-Visibility Positive Values)
+	lane_layer.z_index = 10
+	hit_layer.z_index = 11
+	notes_layer.z_index = 15
+	hit_line.z_index = 16
+	$TopBar.z_index = 20
+	judge_label.z_index = 100 # Ensure it's above everything
+	
+	# 4. Build Textures
+	_build_lane_pngs()
+	_build_hit_pngs()
+	
+	# 5. Feedback
+	_create_ring_indicators()
+	_create_gauge_bar()
+
+func _build_lane_pngs() -> void:
+	_lane_tex.clear()
+	for i in range(NUM_LANES):
+		var tr := TextureRect.new()
+		tr.texture = load("res://assets/line%d.PNG" % (i + 1))
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_SCALE
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		
+		# VISIBILITY ARGS (Restored for visibility)
+		tr.self_modulate = Color(2.0, 2.0, 2.0, 1.0) # Brightness boost needed
+		tr.texture_filter = TEXTURE_FILTER_NEAREST
+		tr.visible = true
+		
+		lane_layer.add_child(tr)
+		_lane_tex.append(tr)
+		print("[PNG_LANE] i=%d tex=%s status=OK" % [i, tr.texture])
+
+func _build_hit_pngs() -> void:
+	_hit_tex.clear()
+	for i in range(NUM_LANES):
+		var htr := TextureRect.new()
+		htr.texture = load("res://assets/box.PNG")
+		htr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		htr.stretch_mode = TextureRect.STRETCH_SCALE
+		htr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		htr.self_modulate = Color(1.0, 1.0, 1.0, 0.45) # Reliable Alpha
+		htr.visible = true
+		hit_layer.add_child(htr)
+		_hit_tex.append(htr)
+
+func _reposition_visuals() -> void:
+	if not is_inside_tree() or not get_viewport(): return
+	var vs := get_viewport().get_visible_rect().size
+	var hitline_y: float = hit_line.global_position.y - global_position.y
+	var lane_w := vs.x / 3.0
+	var top_y := 80.0
+	
+	if hitline_y < 100:
+		get_tree().create_timer(0.2).timeout.connect(_reposition_visuals)
+		return
+
+	# Reposition Lanes (Simple 3rd Split)
+	for i in range(_lane_tex.size()):
+		var tr = _lane_tex[i]
+		var l_x = i * lane_w
+		var l_w = lane_w * 0.98
+		var l_h = (hitline_y - top_y) + HIT_ZONE_HEIGHT * 0.5
+		tr.position = Vector2(l_x + (lane_w * 0.01), top_y)
+		tr.size = Vector2(l_w, max(l_h, 400.0))
+		print("[LANE_TEX] i=%d size=%s pos=%s" % [i, tr.size, tr.position])
+
+	# Reposition HitBoxes
+	for i in range(_hit_tex.size()):
+		var htr = _hit_tex[i]
+		var h_w = lane_w * 0.94
+		htr.size = Vector2(h_w, HIT_ZONE_HEIGHT)
+		htr.position = Vector2((i * lane_w) + (lane_w * 0.03), hitline_y - HIT_ZONE_HEIGHT * 0.5)
+		htr.pivot_offset = htr.size * 0.5
+
+	# Others
+	if _gauge_bg:
+		var bar_x := (vs.x - GAUGE_BAR_W) * 0.5
+		var bar_y := hitline_y - 150.0
+		_gauge_bg.position = Vector2(bar_x, bar_y)
+		_gauge_fill.position = Vector2(bar_x + 2, bar_y + 2)
+
+	for i in range(_ring_nodes.size()):
+		var ring: ColorRect = _ring_nodes[i]
+		ring.position = Vector2((i + 0.5) * lane_w - 30, hitline_y - 10)
+		ring.z_index = 70
+
+func _on_viewport_resized() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_apply_safe_area()
+	_setup_controller()
+	_reposition_visuals()
 
 func _process(_delta: float) -> void:
-	# Poll keyboard hold state + detect press/release transitions
-	if DEBUG_KEYS and OS.has_feature("editor"):
-		_poll_keyboard_hold()
-	# Sync cursor state to controller
 	game_controller.cursor_lane = _held_lane
 	game_controller.cursor_holding = _holding
 	game_controller.process_update()
-	_update_cursor_visual()
-	_update_ring_indicators()
+	_update_visual_status()
 
-## ---- Lane geometry (viewport-based) ----
-
-func _compute_lane_geometry() -> void:
-	var rect: Rect2 = get_viewport().get_visible_rect()
-	var vw: float = rect.size.x
-	_lane_width = vw / float(NUM_LANES)
-	_lane_centers.clear()
-	for i in range(NUM_LANES):
-		_lane_centers.append(_lane_width * (float(i) + 0.5))
-	# Very forgiving swipe threshold: ~2% of width or minimum 15 pixels
-	_swipe_threshold = maxf(vw * 0.02, 15.0)
-
-func _get_lane_from_x(x: float) -> int:
-	if _lane_width <= 0:
-		return 1
-	# Subtract viewport rect origin for devices with notch/letterboxing offset
-	var rect_x: float = get_viewport().get_visible_rect().position.x
-	return clampi(int((x - rect_x) / _lane_width), 0, NUM_LANES - 1)
-
-## ---- Safe Area ----
-
-func _apply_safe_area() -> void:
-	var top_bar: Control = $"TopBar"
-	var insets: Dictionary = SafeArea.get_insets()
-	# Push TopBar down by safe top inset
-	top_bar.offset_top += insets["top"]
-
-## ---- Dynamic Lane Guides ----
-
-func _create_lane_guides() -> void:
-	var vh: float = get_viewport().get_visible_rect().size.y
-	var guide_top: float = 80.0
-	var guide_bottom: float = hit_line.position.y + 20.0
-	for i in range(1, NUM_LANES):
-		var guide := ColorRect.new()
-		var gx: float = _lane_width * float(i)
-		guide.position = Vector2(gx - 2.0, guide_top)
-		guide.size = Vector2(4.0, guide_bottom - guide_top)
-		guide.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		guide.color = Color(0.65, 0.68, 0.72, 0.3)
-		add_child(guide)
-		move_child(guide, 1)  # Behind most elements, just above BG
-		_lane_guide_nodes.append(guide)
-
-## ---- Debug Touch Lane ----
-
-func _create_debug_lane_label() -> void:
-	if not DEBUG_TOUCH_LANE:
-		return
-	_debug_lane_label = Label.new()
-	_debug_lane_label.text = "LANE: -"
-	_debug_lane_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_debug_lane_label.add_theme_font_size_override("font_size", 28)
-	_debug_lane_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3, 0.8))
-	_debug_lane_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var vh: float = get_viewport().get_visible_rect().size.y
-	_debug_lane_label.position = Vector2(20, vh - 60)
-	_debug_lane_label.size = Vector2(200, 40)
-	add_child(_debug_lane_label)
-
-func _debug_show_lane(lane: int) -> void:
-	if not DEBUG_TOUCH_LANE or _debug_lane_label == null:
-		return
-	_debug_lane_label.text = "LANE: %d" % lane
-	# Flash the hit box
-	_flash_hit_box(lane)
-
-## ---- Calibration UI (DEBUG_CALIBRATE only) ----
-
-func _create_calibration_ui() -> void:
-	var vw: float = get_viewport().get_visible_rect().size.x
-	
-	# Container at top-right
-	var container := HBoxContainer.new()
-	container.position = Vector2(vw - 420, 8)
-	container.size = Vector2(400, 50)
-	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(container)
-	
-	# -10 button
-	_calib_minus_btn = Button.new()
-	_calib_minus_btn.text = "-10ms"
-	_calib_minus_btn.custom_minimum_size = Vector2(90, 44)
-	_calib_minus_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	_calib_minus_btn.pressed.connect(_on_calib_minus)
-	container.add_child(_calib_minus_btn)
-	
-	# Offset label
-	_calib_label = Label.new()
-	_calib_label.text = "OFFSET: 0ms"
-	_calib_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_calib_label.custom_minimum_size = Vector2(160, 44)
-	_calib_label.add_theme_font_size_override("font_size", 22)
-	_calib_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.6))
-	_calib_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	container.add_child(_calib_label)
-	
-	# +10 button
-	_calib_plus_btn = Button.new()
-	_calib_plus_btn.text = "+10ms"
-	_calib_plus_btn.custom_minimum_size = Vector2(90, 44)
-	_calib_plus_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	_calib_plus_btn.pressed.connect(_on_calib_plus)
-	container.add_child(_calib_plus_btn)
-	
-	_update_calib_label()
-
-func _on_calib_minus() -> void:
-	SaveData.input_offset_ms = clampf(SaveData.input_offset_ms - 10.0, -200.0, 200.0)
-	game_controller.input_offset_ms = SaveData.input_offset_ms
-	SaveData.save_data()
-	_update_calib_label()
-
-func _on_calib_plus() -> void:
-	SaveData.input_offset_ms = clampf(SaveData.input_offset_ms + 10.0, -200.0, 200.0)
-	game_controller.input_offset_ms = SaveData.input_offset_ms
-	SaveData.save_data()
-	_update_calib_label()
-
-func _update_calib_label() -> void:
-	if _calib_label:
-		var ms: int = int(SaveData.input_offset_ms)
-		_calib_label.text = "OFFSET: %dms" % ms
-
-func _get_scratch_pair_from_x(x: float) -> int:
-	var mid: float = _lane_centers[1] if _lane_centers.size() > 1 else 540.0
-	return 0 if x < mid else 1
-
-## ---- Cursor visual ----
-
-func _update_cursor_visual() -> void:
-	if not cursor_indicator or _lane_centers.is_empty():
-		return
-	var cx: float = _lane_centers[_held_lane] if _held_lane < _lane_centers.size() else 540.0
-	var indicator_w: float = 80.0
-	cursor_indicator.position.x = cx - indicator_w * 0.5
-	cursor_indicator.size.x = indicator_w
-	cursor_indicator.modulate.a = 0.7 if _holding else 0.35
-
-## ---- Ring indicators (per lane at hitline) ----
-
-func _create_ring_indicators() -> void:
-	for i in range(NUM_LANES):
-		var ring := ColorRect.new()
-		ring.size = Vector2(60, 20)
-		ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		ring.color = Color(0.7, 0.7, 0.7, 0.15)
-		ring.position = Vector2(_lane_centers[i] - 30, hit_line.position.y - 10)
-		add_child(ring)
-		_ring_nodes.append(ring)
-
-func _update_ring_indicators() -> void:
+func _update_visual_status() -> void:
 	for i in range(_ring_nodes.size()):
 		var ring: ColorRect = _ring_nodes[i]
-		if _holding and _held_lane == i:
-			ring.color = Color(1.0, 0.85, 0.5, 0.5)  # bright gold when held
-		else:
-			ring.color = Color(0.7, 0.7, 0.7, 0.15)  # dim when not held
+		ring.color = Color(1.0, 0.85, 0.5, 0.5) if (_holding and _held_lane == i) else Color(0.7, 0.7, 0.7, 0.15)
+	$TopBar.modulate.a = 1.0
 
-## ---- Hit boxes (per lane at hitline) ----
-
-func _create_hit_boxes() -> void:
-	var box_w: float = _lane_width * 0.92
-	var box_y: float = hit_line.position.y - HIT_ZONE_HEIGHT * 0.5
-	var exc_h: float = 60.0 # Physical height representing the Excellent window
+func _on_judgement(grade: int, _delta: float) -> void:
+	var vs := get_viewport().get_visible_rect().size
+	var grade_color := Judgement.get_color(grade)
 	
-	for i in range(NUM_LANES):
-		# General hit zone (faint)
-		var box := ColorRect.new()
-		box.size = Vector2(box_w, HIT_ZONE_HEIGHT)
-		box.position = Vector2(_lane_centers[i] - box_w * 0.5, box_y)
-		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		box.color = Color(0.95, 0.88, 0.75, 0.08)
-		add_child(box)
-		move_child(box, get_child_count() - 2)
-		_hitbox_nodes.append(box)
-		
-		# Excellent timing guide (gold, bright center)
-		var exc_box := ColorRect.new()
-		exc_box.size = Vector2(box_w, exc_h)
-		exc_box.position = Vector2(_lane_centers[i] - box_w * 0.5, hit_line.position.y - exc_h * 0.5)
-		exc_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		exc_box.color = Color(1.0, 0.85, 0.5, 0.15)
-		add_child(exc_box)
-		move_child(exc_box, get_child_count() - 2)
+	# Rotate through pool
+	var lbl = _judge_labels[_judge_pool_idx]
+	_judge_pool_idx = (_judge_pool_idx + 1) % _judge_labels.size()
+	
+	# Reset state
+	lbl.text = Judgement.GRADE_NAMES[grade]
+	lbl.modulate = grade_color * 3.0 # Maximum Glow for check
+	lbl.modulate.a = 1.0
+	lbl.scale = Vector2(0.5, 0.5)
+	
+	# Positioning: Center + Small random jitter to prevent perfect stacking
+	var jitter := Vector2(randf_range(-40, 40), randf_range(-20, 20))
+	lbl.position = Vector2(vs.x * 0.5 - 300, vs.y * 0.35 - 60) + jitter
+	lbl.pivot_offset = Vector2(300, 30)
+	lbl.show()
+	
+	var tw := lbl.create_tween()
+	tw.set_parallel(true)
+	tw.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	
+	# Faster animation for high-density visibility
+	tw.tween_property(lbl, "scale", Vector2(1.4, 1.4), 0.05)
+	tw.tween_property(lbl, "scale", Vector2(1.0, 1.0), 0.1).set_delay(0.05)
+	tw.tween_property(lbl, "modulate:a", 0.0, 0.2).set_delay(0.25)
+	
+	_flash_hit_box(_held_lane)
 
-func _flash_hit_box(lane: int) -> void:
-	if lane < 0 or lane >= _hitbox_nodes.size():
-		return
-	var box: ColorRect = _hitbox_nodes[lane]
-	var tw := create_tween()
-	box.color = Color(1.0, 0.92, 0.7, 0.25)
-	tw.tween_property(box, "color", Color(0.95, 0.88, 0.75, 0.08), 0.12)
-
-## ---- Churu Gauge Bar (TICKET 10) ----
-
-func _create_gauge_bar() -> void:
-	var vw: float = get_viewport().get_visible_rect().size.x
-	var bar_x: float = (vw - GAUGE_BAR_W) * 0.5
-	var bar_y: float = 1240.0  # above target zone
-	# Background (cream)
-	_gauge_bg = ColorRect.new()
-	_gauge_bg.size = Vector2(GAUGE_BAR_W, GAUGE_BAR_H)
-	_gauge_bg.position = Vector2(bar_x, bar_y)
-	_gauge_bg.color = Color(0.96, 0.93, 0.88, 0.5)
-	_gauge_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_gauge_bg)
-	# Fill (coral pastel)
-	_gauge_fill = ColorRect.new()
-	_gauge_fill.size = Vector2(0, GAUGE_BAR_H - 4)
-	_gauge_fill.position = Vector2(bar_x + 2, bar_y + 2)
-	_gauge_fill.color = Color(0.95, 0.55, 0.65, 0.8)
-	_gauge_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_gauge_fill)
+func _on_score_changed(score: int, _combo: int) -> void:
+	if score_label: score_label.text = str(score)
+	if combo_label:
+		combo_label.text = "%d COMBO" % _combo if _combo >= 2 else ""
+		combo_label.modulate.a = 1.0 if _combo >= 2 else 0.0
 
 func _on_gauge_changed(value: float) -> void:
 	if _gauge_fill:
-		var ratio: float = clampf(value / 100.0, 0.0, 1.0)
+		var ratio := clampf(value / float(game_controller.GAUGE_MAX), 0.0, 1.0)
 		_gauge_fill.size.x = (GAUGE_BAR_W - 4) * ratio
-		# Color shifts toward gold as gauge fills
-		_gauge_fill.color = Color(
-			lerpf(0.95, 1.0, ratio),
-			lerpf(0.55, 0.85, ratio),
-			lerpf(0.65, 0.4, ratio),
-			0.8
-		)
 
-## ---- Fever Overlay (TICKET 10) ----
+func _on_fever_started() -> void: fever_ui.start_fever(game_controller)
+func _on_fever_ended() -> void: fever_ui.end_fever(); _reposition_visuals()
+func _on_run_finished() -> void: SceneRouter.flow_to_result()
+func _on_back() -> void: _run_cancelled = true; game_controller.stop_run(); SceneRouter.back()
+func _on_next() -> void: _run_cancelled = true; SaveData.last_run_summary = game_controller.get_run_summary(); game_controller.stop_run(); SceneRouter.flow_to_result()
 
-func _create_fever_overlay() -> void:
-	# Fullscreen overlay (hidden by default)
-	_fever_overlay = ColorRect.new()
-	_fever_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_fever_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_fever_overlay.color = Color(1.0, 0.8, 0.9, 0.0)
-	_fever_overlay.visible = false
-	add_child(_fever_overlay)
-	# FEVER label (hidden) — big and flashy
-	_fever_label = Label.new()
-	_fever_label.text = "🔥 FEVER TIME 🔥"
-	_fever_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_fever_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_fever_label.position = Vector2(-250, 160)
-	_fever_label.size = Vector2(500, 100)
-	_fever_label.add_theme_font_size_override("font_size", 80)
-	_fever_label.modulate = Color(1.0, 0.85, 0.2, 0.0)
-	_fever_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_fever_label.pivot_offset = Vector2(250, 50)
-	add_child(_fever_label)
+func _create_gauge_bar() -> void:
+	if not _gauge_bg:
+		_gauge_bg = ColorRect.new(); _gauge_bg.size = Vector2(GAUGE_BAR_W, GAUGE_BAR_H); _gauge_bg.color = Color(0.1, 0.08, 0.16, 0.5); add_child(_gauge_bg)
+	if not _gauge_fill:
+		_gauge_fill = ColorRect.new(); _gauge_fill.size = Vector2(0, GAUGE_BAR_H - 4); _gauge_fill.color = Color(0.95, 0.55, 0.65, 0.8); add_child(_gauge_fill)
+	_gauge_bg.z_index = 8; _gauge_fill.z_index = 9
 
-func _on_fever_started() -> void:
-	if _fever_overlay:
-		_fever_overlay.visible = true
-		_start_rainbow_cycle()
-	# Big flashy FEVER label entrance
-	if _fever_label:
-		_fever_label.scale = Vector2(0.3, 0.3)
-		_fever_label.modulate.a = 1.0
-		var tw := create_tween()
-		# Bounce in
-		tw.tween_property(_fever_label, "scale", Vector2(1.2, 1.2), 0.15).set_ease(Tween.EASE_OUT)
-		tw.tween_property(_fever_label, "scale", Vector2(0.9, 0.9), 0.1)
-		tw.tween_property(_fever_label, "scale", Vector2(1.0, 1.0), 0.08)
-		# Hold visible
-		tw.tween_interval(1.2)
-		# Fade out
-		tw.tween_property(_fever_label, "modulate:a", 0.0, 0.3)
-	# ---- Spawn Fever Door ----
-	_spawn_fever_door()
+func _create_ring_indicators() -> void:
+	for n in _ring_nodes: n.queue_free()
+	_ring_nodes.clear()
+	for i in range(NUM_LANES):
+		var ring := ColorRect.new(); ring.size = Vector2(60, 20); ring.color = Color(0.7, 0.7, 0.7, 0.15); add_child(ring); _ring_nodes.append(ring)
 
-func _on_fever_ended() -> void:
-	if _fever_overlay:
-		_fever_overlay.visible = false
-	if _fever_label:
-		_fever_label.modulate.a = 0.0
-	if _fever_tween and _fever_tween.is_valid():
-		_fever_tween.kill()
-		_fever_tween = null
-	# ---- Dismiss Fever Door ----
-	if _fever_door and is_instance_valid(_fever_door):
-		_fever_door.slide_away()
-		_fever_door = null
-
-func _start_rainbow_cycle() -> void:
-	if _fever_tween and _fever_tween.is_valid():
-		_fever_tween.kill()
-	_fever_tween = create_tween().set_loops()
-	# Vivid rainbow colors — more intense alpha for visibility
-	var colors: Array[Color] = [
-		Color(1.0, 0.5, 0.5, 0.18),  # vivid red
-		Color(1.0, 0.75, 0.3, 0.18), # vivid orange
-		Color(1.0, 1.0, 0.4, 0.18),  # vivid yellow
-		Color(0.4, 1.0, 0.5, 0.18),  # vivid green
-		Color(0.4, 0.7, 1.0, 0.18),  # vivid blue
-		Color(0.7, 0.4, 1.0, 0.18),  # vivid purple
-		Color(1.0, 0.5, 0.75, 0.18), # vivid pink
-	]
-	for col in colors:
-		_fever_tween.tween_property(_fever_overlay, "color", col, 0.35)
-
-## ---- Fever Door ----
-
-func _bind_fever_door() -> void:
-	var nodes := get_tree().get_nodes_in_group("fever_door")
-	
-	if nodes.is_empty():
-		push_warning("[GameUI] No FeverDoor found in 'fever_door' group!")
-		return
-	if nodes.size() > 1:
-		push_warning("[GameUI] Multiple FeverDoor nodes found! Keeping only the first one.")
-		for i in range(1, nodes.size()):
-			nodes[i].queue_free()
-	
-	_fever_door = nodes[0]
-	
-	# Connect signal safely
-	if not _fever_door.door_opened.is_connected(_on_fever_door_opened):
-		_fever_door.door_opened.connect(_on_fever_door_opened)
-
-func _spawn_fever_door() -> void:
-	_bind_fever_door()
-	if not _fever_door or not is_instance_valid(_fever_door):
-		return
-
-	var vw: float = get_viewport().get_visible_rect().size.x
-	var vh: float = get_viewport().get_visible_rect().size.y
-	var door_w: float = vw * 0.85
-	var door_h: float = vh * 0.5
-	var door_x: float = (vw - door_w) * 0.5
-
-	_fever_door.size = Vector2(door_w, door_h)
-	_fever_door.position = Vector2(door_x, -door_h - 50)
-	
-	# Reset state and show
-	if _fever_door.has_method("reset"):
-		_fever_door.reset()
-	else:
-		_fever_door.show()
-
-	# Drop-in animation with bounce
-	var target_y: float = (vh - door_h) * 0.35
+func _flash_hit_box(lane: int) -> void:
+	if lane < 0 or lane >= _hit_tex.size(): return
+	var htr: TextureRect = _hit_tex[lane]
 	var tw := create_tween()
-	tw.tween_property(_fever_door, "position:y", target_y + 20, 0.25).set_ease(Tween.EASE_IN)
-	tw.tween_property(_fever_door, "position:y", target_y - 10, 0.1).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_fever_door, "position:y", target_y, 0.08)
-
-func _safe_add_scratch(pos: Vector2) -> void:
-	if not is_instance_valid(_fever_door):
-		_bind_fever_door()
-	
-	if _fever_door and is_instance_valid(_fever_door):
-		_fever_door.add_scratch(pos)
-
-func _on_fever_door_opened() -> void:
-	game_controller.award_door_bonus()
-	_fever_door = null  # Door will free itself via its own tween
-
-	# Big "+500 OPEN!" popup
-	var vw: float = get_viewport().get_visible_rect().size.x
-	var vh: float = get_viewport().get_visible_rect().size.y
-	var lbl := Label.new()
-	lbl.text = "🚀 +500 OPEN!"
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.add_theme_font_size_override("font_size", 64)
-	lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
-	lbl.add_theme_constant_override("shadow_offset_x", 0)
-	lbl.add_theme_constant_override("shadow_offset_y", 4)
-	lbl.position = Vector2(vw * 0.5 - 200, vh * 0.35)
-	lbl.size = Vector2(400, 80)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	lbl.pivot_offset = Vector2(200, 40)
-	add_child(lbl)
-
-	# Scale bounce + fade out
-	lbl.scale = Vector2(0.3, 0.3)
-	var tw := create_tween()
-	tw.tween_property(lbl, "scale", Vector2(1.3, 1.3), 0.15).set_ease(Tween.EASE_OUT)
-	tw.tween_property(lbl, "scale", Vector2(1.0, 1.0), 0.1)
-	tw.tween_interval(0.8)
-	tw.tween_property(lbl, "modulate:a", 0.0, 0.3)
-	tw.tween_callback(lbl.queue_free)
-
-## ---- Score / Combo Labels (TICKET 12: from scene HudCard) ----
-
-func _on_score_changed(new_score: int, new_combo: int) -> void:
-	if _score_label:
-		_score_label.text = str(new_score)
-	if _combo_label:
-		if new_combo >= 2:
-			_combo_label.text = "%d COMBO" % new_combo
-			_combo_label.add_theme_color_override("font_color", Color(0.85, 0.5, 0.2, 0.9))
-		else:
-			_combo_label.text = ""
-			_combo_label.add_theme_color_override("font_color", Color(0.85, 0.5, 0.2, 0.0))
-
-## ---- Controller setup ----
-
-func _setup_controller() -> void:
-	game_controller.notes_layer = notes_layer
-	game_controller.spawn_y = _note_spawn_y
-	game_controller.hitline_y = hit_line.position.y
-	game_controller.lane_centers_x = _lane_centers
-	game_controller.hit_zone_half_h = HIT_ZONE_HEIGHT * 0.5
-
-## ---- Difficulty (TICKET 12: moved to Boot, kept internal for debug) ----
-
-func _on_diff_selected(diff: String) -> void:
-	_current_diff = diff
-	game_controller.stop_run()
-	_start_chart(diff)
+	tw.set_parallel(true)
+	htr.scale = Vector2(1.15, 1.15)
+	htr.self_modulate = Color(2.5, 2.5, 4.0, 1.0)
+	tw.tween_property(htr, "scale", Vector2(1.0, 1.0), 0.1).set_ease(Tween.EASE_OUT)
+	tw.tween_property(htr, "self_modulate", Color(1.0, 1.0, 1.0, 0.45), 0.12)
 
 func _start_chart(diff: String) -> void:
 	_run_cancelled = false
-	var vw: float = get_viewport().get_visible_rect().size.x
-	var vh: float = get_viewport().get_visible_rect().size.y
-	var lbl := Label.new()
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.add_theme_font_size_override("font_size", 140)
-	lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2))
-	lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.5))
-	lbl.add_theme_constant_override("shadow_offset_x", 0)
-	lbl.add_theme_constant_override("shadow_offset_y", 6)
-	lbl.position = Vector2(vw * 0.5 - 200, vh * 0.4 - 100) # Slightly above center
-	lbl.size = Vector2(400, 200)
-	lbl.pivot_offset = Vector2(200, 100)
-	add_child(lbl)
-
+	var vs := get_viewport().get_visible_rect().size
+	var lbl := Label.new(); lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; lbl.add_theme_font_size_override("font_size", 140); lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2)); lbl.position = Vector2(vs.x * 0.5 - 200, vs.y * 0.4 - 100); lbl.size = Vector2(400, 200); lbl.pivot_offset = Vector2(200, 100); add_child(lbl); lbl.z_index = 100
 	var seq: Array = ["3", "2", "1", "START!"]
 	for i in range(seq.size()):
-		var text: String = str(seq[i])
-		var callable: Callable = func(t_val: String):
+		get_tree().create_timer(i * 1.0).timeout.connect(func():
 			if _run_cancelled or not is_instance_valid(lbl): return
-			
-			# Kill previous tween to prevent alpha interference (e.g. 1.0s fade finishing exactly when next number starts)
-			if lbl.has_meta("tw"):
-				var old_tw: Tween = lbl.get_meta("tw")
-				if old_tw and old_tw.is_valid():
-					old_tw.kill()
-					
-			lbl.text = t_val
-			lbl.scale = Vector2(0.3, 0.3)
-			lbl.modulate.a = 1.0
-			
-			var tw := create_tween()
-			lbl.set_meta("tw", tw)
-			tw.tween_property(lbl, "scale", Vector2(1.2, 1.2), 0.15).set_ease(Tween.EASE_OUT)
-			tw.tween_property(lbl, "scale", Vector2(1.0, 1.0), 0.1)
-			tw.tween_interval(0.5)
-			tw.tween_property(lbl, "modulate:a", 0.0, 0.25)
-			
-		get_tree().create_timer(i * 1.0).timeout.connect(callable.bind(text))
-	
+			lbl.text = str(seq[i]); lbl.scale = Vector2(0.3, 0.3); lbl.modulate.a = 1.0; var tw := create_tween(); tw.tween_property(lbl, "scale", Vector2(1.2, 1.2), 0.15).set_ease(Tween.EASE_OUT); tw.tween_property(lbl, "scale", Vector2(1.0, 1.0), 0.1); tw.tween_interval(0.5); tw.tween_property(lbl, "modulate:a", 0.0, 0.25)
+		)
 	get_tree().create_timer(seq.size() * 1.0).timeout.connect(func():
-		if is_instance_valid(lbl):
-			lbl.queue_free()
-		# Only start if the user hasn't backed out during countdown
-		if not _run_cancelled and is_inside_tree():
-			game_controller.start_run(diff)
+		if is_instance_valid(lbl): lbl.queue_free()
+		if not _run_cancelled and is_inside_tree(): game_controller.start_run(diff)
 	)
 
-## ---- Navigation ----
-
-func _on_back() -> void:
-	_run_cancelled = true
-	game_controller.stop_run()
-	SceneRouter.back()
-
-func _on_next() -> void:
-	_run_cancelled = true
-	SaveData.last_run_summary = game_controller.get_run_summary()
-	game_controller.stop_run()
-	SceneRouter.flow_to_result()
-
-func _on_run_finished() -> void:
-	SaveData.last_run_summary = game_controller.get_run_summary()
-	SceneRouter.flow_to_result()
-
-## ---- Input ----
-
-func _input(event: InputEvent) -> void:
-	if DEBUG_EVENT_PROBE and game_controller.is_fever:
-		var fr: int = Engine.get_process_frames()
-		var log_it := false
-		
-		# Only log MouseMotion if a button is actually pressed (spam reduction)
-		if event is InputEventMouseMotion:
-			if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-				log_it = true
-		else:
-			log_it = true
-			
-		if log_it:
-			if fr != _probe_frame:
-				_probe_frame = fr
-				_probe_count = 0
-			_probe_count += 1
-			
-			var cls: String = event.get_class()
-			var msg: String = "EVENT: %s frame=%d n=%d" % [cls, fr, _probe_count]
-			
-			if event is InputEventScreenTouch:
-				msg += " idx=%d pressed=%s pos=%s" % [event.index, str(event.pressed), str(event.position)]
-			elif event is InputEventScreenDrag:
-				msg += " idx=%d pos=%s" % [event.index, str(event.position)]
-			elif event is InputEventMouseButton:
-				msg += " btn=%d pressed=%s pos=%s" % [event.button_index, str(event.pressed), str(event.position)]
-			elif event is InputEventMouseMotion:
-				msg += " pos=%s LMB=true" % str(event.position)
-			
-			print(msg)
-
-	if not game_controller.is_fever or _fever_door == null or not is_instance_valid(_fever_door):
-		return
-
-	# Handle both ScreenTouch/ScreenDrag (real device) AND MouseButton/MouseMotion (editor).
-	# When "Emulate Touch From Mouse" is ON, both fire for the same click — the frame
-	# dedup guard (_last_scratch_frame) prevents double-counting.
-	var pos: Vector2 = Vector2.ZERO
-	var is_press := false
-	var is_drag := false
-
-	if event is InputEventScreenTouch:
-		pos = event.position
-		is_press = event.pressed
-	elif event is InputEventScreenDrag:
-		pos = event.position
-		is_drag = true
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		pos = event.position
-		is_press = event.pressed
-	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		pos = event.position
-		is_drag = true
-
-	if pos == Vector2.ZERO:
-		return
-
-	# Time + frame dedup: prevent emulated/duplicate events from double-counting
-	var current_frame: int = Engine.get_process_frames()
-	var now_ms: int = Time.get_ticks_msec()
-	if current_frame == _last_scratch_frame:
-		return
-	if (now_ms - _last_scratch_time_ms) < SCRATCH_MIN_INTERVAL_MS:
-		return
-
-	var should_scratch := false
-	if is_press:
-		# Finger/click down: first scratch + record anchor for drags
-		_last_drag_pos = pos
-		should_scratch = true
-	elif is_drag:
-		# Drag: scratch every 5px of movement
-		if pos.distance_to(_last_drag_pos) >= 5.0:
-			_last_drag_pos = pos
-			should_scratch = true
-
-	if should_scratch:
-		_last_scratch_frame = current_frame
-		_last_scratch_time_ms = now_ms
-		# (a) Controller increments and returns authoritative count
-		var count: int = game_controller.handle_fever_scratch()
-		if count > 0:
-			# (b) Visual scratch marks
-			_safe_add_scratch(pos)
-			# (c) Sync UI count from controller (single source of truth)
-			if _fever_door and is_instance_valid(_fever_door):
-				_fever_door.set_count(count)
-		get_viewport().set_input_as_handled()
-
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel"):
-		get_viewport().set_input_as_handled()
-		game_controller.stop_run()
-		SceneRouter.handle_global_back_action()
-		return
-	# Debug keyboard TAP/SCRATCH (editor only) — press events only
-	if DEBUG_KEYS and OS.has_feature("editor") and event is InputEventKey and event.pressed and not event.echo:
-		_handle_debug_key(event.keycode)
-
-func _on_tap_area_input(event: InputEvent) -> void:
-	# ---- NORMAL MODE ONLY (Fever handled by _input) ----
-	if game_controller.is_fever:
-		return
-	# Touch events (real device)
+	if game_controller.is_fever and not game_controller.fever_time_unfrozen: return
+	if not game_controller.is_running(): return
+	
+	if event is InputEventKey and not event.is_echo():
+		var l: int = -1
+		var kcode: int = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+		match kcode:
+			KEY_Q: l = 0
+			KEY_W: l = 1
+			KEY_E: l = 2
+		if l != -1:
+			if event.is_pressed():
+				_held_lane = l; _holding = true
+				game_controller.handle_tap(l); game_controller.handle_moving_press(l)
+			else:
+				if _held_lane == l: _holding = false
+				game_controller.handle_moving_release(l)
+			return
+			
+	var pos: Vector2 = Vector2.ZERO
+	var is_pressed: bool = false
 	if event is InputEventScreenTouch:
-		_handle_touch(event.position, event.pressed)
-		return
-	if event is InputEventScreenDrag:
-		_handle_drag(event.position)
-		return
-	# Mouse events (editor testing)
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		_handle_touch(event.position, event.pressed)
-		return
-	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		_handle_drag(event.position)
-		return
-
-func _handle_drag(pos: Vector2) -> void:
-	_update_held_lane_from_x(pos.x)
-
-func _handle_touch(pos: Vector2, pressed: bool) -> void:
-	if pressed:
-		_touch_start_pos = pos
-		_last_drag_pos = pos
-		_touch_active = true
-		_holding = true
-		_update_held_lane_from_x(pos.x)
-		_debug_show_lane(_held_lane)
-	else:
-		_holding = false
-		if not _touch_active:
-			return
-		_touch_active = false
-		tap_area.accept_event()
-		_classify_and_dispatch(pos)
-
-func _update_held_lane_from_x(x: float) -> void:
-	_held_lane = _get_lane_from_x(x)
-	_holding = true
-
-func _classify_and_dispatch(end_pos: Vector2) -> void:
-	var dist: float = end_pos.distance_to(_touch_start_pos)
-	# During fever, scratches are handled exclusively by _input() — don't double-fire here
-	if game_controller.is_fever:
-		return
-	# Omni-directional swipe: regular tap
-	if dist >= _swipe_threshold:
-		_last_action = "scratch"
-	else:
-		_last_action = "tap"
-		game_controller.handle_tap(_get_lane_from_x(_touch_start_pos.x))
-
-## ---- Judgement display + FX ----
-
-func _on_judgement(grade: int, delta_ms: float) -> void:
-	_show_judge(grade, delta_ms)
-	_spawn_pawprint_fx(grade)
-	_flash_hit_box(_held_lane)
-
-func _show_judge(grade: int, delta_ms: float = 0.0) -> void:
-	if _judge_tween and _judge_tween.is_valid():
-		_judge_tween.kill()
-	var ms_text: String = "%dms" % int(absf(delta_ms))
-	judge_label.text = "%s (%s)" % [Judgement.get_grade_name(grade), ms_text]
-	judge_label.modulate = Judgement.get_color(grade)
-	judge_label.modulate.a = 1.0
-	_judge_tween = create_tween()
-	_judge_tween.tween_interval(0.25)
-	_judge_tween.tween_property(judge_label, "modulate:a", 0.0, 0.15)
-
-func _spawn_pawprint_fx(grade: int) -> void:
-	var tint: Color = Judgement.get_color(grade)
-	var spawn_pos: Vector2 = hit_line.global_position + Vector2(30.0, -30.0)
-	fx_layer.spawn_pawprint(spawn_pos, tint, false, 0)
-
-## ---- Fever Scratch floating bonus FX ----
-
-func _show_fever_scratch_fx(pos: Vector2, bonus: int) -> void:
-	# Spawn pawprint with fever gold tint
-	var fx_pos: Vector2 = Vector2(pos.x, hit_line.global_position.y - 40)
-	fx_layer.spawn_pawprint(fx_pos, Color(1.0, 0.85, 0.2), true, 0)
-	# Floating "+50" text
-	var lbl := Label.new()
-	lbl.text = "+%d" % bonus
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.add_theme_font_size_override("font_size", 48)
-	lbl.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
-	lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.5))
-	lbl.add_theme_constant_override("shadow_offset_x", 0)
-	lbl.add_theme_constant_override("shadow_offset_y", 3)
-	lbl.position = Vector2(pos.x - 40, hit_line.position.y - 80)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(lbl)
-	var tw := create_tween()
-	tw.tween_property(lbl, "position:y", lbl.position.y - 60, 0.4).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(lbl, "modulate:a", 0.0, 0.4).set_delay(0.15)
-	tw.tween_callback(lbl.queue_free)
-
-## ---- Debug keyboard: QWE polling + press/release detection ----
-## Polling detects physical hold state AND transitions (press/release).
-## Press → fires TAP + moving_press.
-## Release → fires moving_release.
-
-func _poll_keyboard_hold() -> void:
-	var q: bool = Input.is_key_pressed(KEY_Q)
-	var w: bool = Input.is_key_pressed(KEY_W)
-	var e: bool = Input.is_key_pressed(KEY_E)
-
-	# Detect press transitions: was not held → now held
-	if q and not _prev_q_held:
-		game_controller.handle_moving_press(0)
-	if w and not _prev_w_held:
-		game_controller.handle_moving_press(1)
-	if e and not _prev_e_held:
-		game_controller.handle_moving_press(2)
-
-	# Detect release transitions: was held → now not held
-	if not q and _prev_q_held:
-		game_controller.handle_moving_release(0)
-	if not w and _prev_w_held:
-		game_controller.handle_moving_release(1)
-	if not e and _prev_e_held:
-		game_controller.handle_moving_release(2)
-
-	# Update prev state
-	_prev_q_held = q
-	_prev_w_held = w
-	_prev_e_held = e
-
-	# Set holding state from polling
-	if q:
-		_held_lane = 0
-		_holding = true
-	elif w:
-		_held_lane = 1
-		_holding = true
-	elif e:
-		_held_lane = 2
-		_holding = true
-	else:
-		if not _touch_active:
+		pos = event.position; is_pressed = event.pressed
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		pos = event.position; is_pressed = event.pressed
+	elif event is InputEventScreenDrag:
+		pos = event.position; is_pressed = true
+		
+	if pos != Vector2.ZERO:
+		var vs := get_viewport().get_visible_rect().size
+		var l := LaneGeometry.get_lane_at_pos(pos, vs)
+		if is_pressed:
+			if l != -1:
+				_held_lane = l; _holding = true
+				if event is InputEventScreenTouch or event is InputEventMouseButton:
+					game_controller.handle_tap(l); game_controller.handle_moving_press(l)
+		else:
 			_holding = false
+			if l != -1: game_controller.handle_moving_release(l)
+			elif _held_lane != -1: game_controller.handle_moving_release(_held_lane)
 
-## TAP/SCRATCH on key press (co-exists with moving_press)
-func _handle_debug_key(keycode: int) -> void:
-	if keycode != KEY_Q and keycode != KEY_W and keycode != KEY_E:
-		return
-	var lane: int = _key_to_lane(keycode)
-	# Check scratch combo
-	var now_ms: float = float(Time.get_ticks_msec())
-	if _last_key >= 0 and (now_ms - _last_key_time_ms) <= COMBO_WINDOW_MS:
-		var pair: int = _try_scratch_pair(_last_key, keycode)
-		if pair >= 0:
-			_last_action = "scratch"
-			var bonus: int = game_controller.handle_fever_scratch()
-			if bonus > 0:
-				var scratch_pos := Vector2(get_viewport().get_visible_rect().size.x * 0.5, hit_line.position.y)
-				_safe_add_scratch(scratch_pos)
-				if _fever_door and is_instance_valid(_fever_door):
-					_fever_door.set_count(bonus)
-				_show_fever_scratch_fx(scratch_pos, bonus)
-			_last_key = -1
-			return
-	# Immediate TAP
-	_last_action = "tap"
-	game_controller.handle_tap(lane)
-	_last_key = keycode
-	_last_key_time_ms = now_ms
-
-func _try_scratch_pair(first: int, second: int) -> int:
-	if (first == KEY_Q and second == KEY_W) or (first == KEY_W and second == KEY_Q):
-		return 0
-	if (first == KEY_W and second == KEY_E) or (first == KEY_E and second == KEY_W):
-		return 1
-	return -1
-
-func _key_to_lane(keycode: int) -> int:
-	match keycode:
-		KEY_Q: return 0
-		KEY_W: return 1
-		KEY_E: return 2
-	return 1
+func _apply_safe_area() -> void:
+	var insets := SafeArea.get_insets()
+	$TopBar.position = Vector2(12.0 + insets["left"], 12.0 + insets["top"])
+	var vs := get_viewport().get_visible_rect().size
+	hit_line.position.y = vs.y - insets["bottom"] - 250.0

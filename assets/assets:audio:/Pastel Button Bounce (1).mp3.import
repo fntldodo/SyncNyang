@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://l7tjbowquph8"
+path="res://.godot/imported/Pastel Button Bounce (1).mp3-5641d15dbda029a49c18b06f1330a651.mp3str"
+
+[deps]
+
+source_file="res://assets/assets:audio:/Pastel Button Bounce (1).mp3"
+dest_files=["res://.godot/imported/Pastel Button Bounce (1).mp3-5641d15dbda029a49c18b06f1330a651.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

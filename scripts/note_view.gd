@@ -16,23 +16,10 @@ var near_end: bool = false        # near end_t — "ready to release" highlight
 var is_holding: bool = false      # note has been started (pressed)
 
 const NOTE_SIZE := Vector2(170, 100)
-const SCRATCH_SIZE := Vector2(190, 100)
 const STRIP_WIDTH := 68.0
-
 const DEBUG_HINT := true
 
-# CAN colors (Tap)
-const CAN_BODY := Color(0.95, 0.72, 0.55)
-const CAN_TOP := Color(0.85, 0.62, 0.45)
-const CAN_OUTLINE := Color(0.5, 0.35, 0.25)
-const CAN_LABEL := Color(1.0, 0.95, 0.85)
-
-# CAN SCRATCH colors (Scratch)
-const CAN_SCRATCH_BODY := Color(0.55, 0.75, 0.95)
-const CAN_SCRATCH_TOP := Color(0.45, 0.65, 0.85)
-const CAN_SCRATCH_LABEL := Color(0.85, 0.95, 1.0)
-
-# FISH colors
+# FISH colors (scratch fallback)
 const FISH_BODY := Color(0.45, 0.72, 0.95, 0.95)
 const FISH_BELLY := Color(0.75, 0.88, 0.98, 0.85)
 const FISH_TAIL := Color(0.5, 0.72, 0.88)
@@ -40,23 +27,30 @@ const FISH_OUTLINE := Color(0.36, 0.29, 0.24, 0.95)
 const FISH_EYE := Color(0.15, 0.15, 0.2)
 const FISH_CLAW := Color(0.36, 0.29, 0.24, 0.5)
 
-# CHURU STRIP colors — on-track (bright)
+# CHURU STRIP colors
 const STRIP_ON := Color(0.95, 0.55, 0.75, 0.9)
 const STRIP_ON_GLOW := Color(1.0, 0.7, 0.88, 0.4)
 const STRIP_ON_HIGHLIGHT := Color(1.0, 0.88, 0.93, 0.6)
-# off-track (dimmed)
 const STRIP_OFF := Color(0.55, 0.48, 0.52, 0.5)
 const STRIP_OFF_GLOW := Color(0.6, 0.55, 0.58, 0.15)
-# shared
 const STRIP_OUTLINE := Color(0.6, 0.3, 0.45, 0.9)
 const STRIP_STAR := Color(1.0, 0.95, 0.7, 0.85)
 const STRIP_PAW := Color(0.6, 0.3, 0.45, 0.35)
-# near-end release indicator
 const STRIP_END_GLOW := Color(1.0, 0.95, 0.5, 0.6)
 
 # Hint colors
 const HINT_BG := Color(0.1, 0.1, 0.1, 0.6)
 const HINT_FG := Color(1.0, 1.0, 0.7, 0.9)
+
+# COLOR PALETTE: Coral & Lavender (TICKET B-Next)
+const COLOR_UFO_BODY := Color(1.0, 0.49, 0.44)    # Coral
+const COLOR_UFO_SHADOW := Color(0.9, 0.4, 0.35)
+const COLOR_UFO_GLOW := Color(0.9, 0.75, 1.0, 0.4) # Lavender Glow
+const COLOR_PAW_TRAIL := Color(0.6, 0.3, 0.45, 0.25) # Cocoa Brown / Paw Purple
+const COLOR_UFO_OUTLINE := Color(0.37, 0.29, 0.24, 0.9) # Cocoa Brown
+
+var _spawn_anim_time: float = 0.0
+const SPAWN_KUNG_DURATION := 0.25
 
 var _full_height: float = 130.0
 
@@ -92,45 +86,71 @@ func setup(type: String, diag_dir: String = "\\", note_lane: int = 0,
 
 func _draw() -> void:
 	if note_type == "tap":
-		_draw_can(false)
+		_draw_ufo_stamp(false)
 	elif note_type == "moving":
 		_draw_churu_strip()
 	else:
-		_draw_can(true) # Draw a Can for scratch as well, but with different colors
-		_draw_debug_hint()
+		_draw_ufo_stamp(true)
 
-## ---- CAN (tap & scratch note) ----
+func _process(delta: float) -> void:
+	if _spawn_anim_time < SPAWN_KUNG_DURATION:
+		_spawn_anim_time += delta
+		queue_redraw()
 
-func _draw_can(is_scratch: bool) -> void:
-	var body_col = CAN_SCRATCH_BODY if is_scratch else CAN_BODY
-	var top_col = CAN_SCRATCH_TOP if is_scratch else CAN_TOP
-	var label_col = CAN_SCRATCH_LABEL if is_scratch else CAN_LABEL
-	var out_col = CAN_OUTLINE
-	
+## ---- UFO STAMP (TICKET B-Next) ----
+
+func _draw_ufo_stamp(is_scratch: bool) -> void:
 	var w: float = size.x
 	var h: float = size.y
 	var cx: float = w * 0.5
-	var mx: float = w * 0.12
-	var body_rect := Rect2(mx, h * 0.25, w - mx * 2, h * 0.69)
-	draw_rect(body_rect, body_col)
-	draw_rect(Rect2(mx + 2, h * 0.4, w - mx * 2 - 4, h * 0.18), label_col)
-	var top_rect := Rect2(mx + 4, h * 0.17, w - mx * 2 - 8, h * 0.1)
-	draw_rect(top_rect, top_col)
-	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.05, out_col)
-	draw_circle(Vector2(cx + w * 0.1, h * 0.2), w * 0.03, top_col)
-	draw_rect(body_rect, out_col, false, 1.0)
-	draw_rect(top_rect, out_col, false, 0.8)
+	var cy: float = h * 0.5
+	
+	# 1. Draw Paw Trail (Repeating icons behind the note)
+	# The trail fades out as it goe up
+	_draw_paw_trail(cx, cy, h)
+	
+	# 2. Spawn Animation (Kung Bounce)
+	var t: float = clampf(_spawn_anim_time / SPAWN_KUNG_DURATION, 0.0, 1.0)
+	var anim_scale: float = 1.0
+	
+	if t < 1.0:
+		anim_scale = lerpf(1.3, 1.0, t) # Bounce from 1.3 to 1.0
+
+	# UFO Body Drawing (Coral)
+	var body_w: float = w * 0.65 * anim_scale
+	var body_h: float = h * 0.5 * anim_scale
+	var body_rect := Rect2(cx - body_w * 0.5, cy - body_h * 0.5, body_w, body_h)
+	
+	# Glow (Lavender)
+	draw_circle(Vector2(cx, cy), body_w * 0.6, COLOR_UFO_GLOW)
+	
+	# Main Body
+	draw_rect(body_rect, COLOR_UFO_BODY, true)
+	draw_rect(body_rect, COLOR_UFO_OUTLINE, false, 2.0)
+	
+	# Top Handle/Dome
+	var dome_r: float = body_w * 0.25
+	draw_circle(Vector2(cx, cy - body_h * 0.4), dome_r, COLOR_UFO_SHADOW)
+	draw_circle(Vector2(cx, cy - body_h * 0.4), dome_r, COLOR_UFO_OUTLINE, false, 2.0)
+	
+	# Stamp Pattern (Tiny paw in the center)
+	_draw_tiny_paw(Vector2(cx, cy), COLOR_UFO_OUTLINE)
 	
 	if is_scratch:
-		# Draw bright directional arrows on the label
-		var arrow_col := Color(1.0, 0.95, 0.2) # Bright yellow
-		var text_pos := Vector2(cx, h * 0.55)
-		var arrow_txt := ">>" if diag == "\\" else "<<"
-		draw_string(ThemeDB.fallback_font, text_pos + Vector2(-15, 0), arrow_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 32, arrow_col)
-		# Draw subtle shadow for visibility
-		draw_string(ThemeDB.fallback_font, text_pos + Vector2(-14, 2), arrow_txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 32, Color(0,0,0,0.3))
-	else:
-		_draw_tiny_paw(Vector2(cx, h * 0.52), out_col)
+		# Draw directional indicators for scratch
+		var arrow_col := Color(1.0, 1.0, 0.8)
+		var txt := ">>" if diag == "\\" else "<<"
+		draw_string(ThemeDB.fallback_font, Vector2(cx - 20, cy + 10), txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 24, arrow_col)
+
+func _draw_paw_trail(cx: float, cy: float, _h: float) -> void:
+	# Only draw trail if not at the very top
+	var count := 4
+	for i in range(1, count + 1):
+		var offset_y: float = -i * 120.0
+		var trail_alpha: float = lerpf(0.3, 0.0, float(i) / float(count))
+		var trail_col := COLOR_PAW_TRAIL
+		trail_col.a *= trail_alpha
+		_draw_tiny_paw(Vector2(cx, cy + offset_y), trail_col)
 
 ## ---- FISH (scratch note) ----
 
@@ -268,7 +288,9 @@ func _make_ellipse(cx: float, cy: float, rx: float, ry: float) -> PackedVector2A
 	return pts
 
 func _draw_tiny_paw(pos: Vector2, color: Color) -> void:
-	draw_circle(pos + Vector2(0, 2), 4.5, color)
-	draw_circle(pos + Vector2(-5, -4), 2.5, color)
-	draw_circle(pos + Vector2(0, -6), 2.5, color)
-	draw_circle(pos + Vector2(5, -4), 2.5, color)
+	# Main pad
+	draw_circle(pos + Vector2(0, 2), 6.5, color)
+	# Toe pads
+	draw_circle(pos + Vector2(-7, -4), 3.5, color)
+	draw_circle(pos + Vector2(0, -7), 3.5, color)
+	draw_circle(pos + Vector2(7, -4), 3.5, color)

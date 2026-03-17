@@ -17,7 +17,7 @@ const NoteViewScript := preload("res://scripts/note_view.gd")
 
 const DEBUG := false
 const NUM_LANES := 3
-const MISS_WINDOW_SEC := 0.13
+const MISS_WINDOW_SEC := 0.20
 
 ## Audio latency offset (loaded from SaveData at start_run)
 var input_offset_ms: float = 0.0
@@ -35,7 +35,9 @@ var _start_ticks: int = 0
 var _running: bool = false
 
 ## Lane geometry (set by game_ui)
-var lane_centers_x: Array = []
+var lane_centers_x: Array = []       # Hitline centers (legacy/fallback)
+var lane_centers_top: Array = []      # Top/Spawn centers
+var lane_centers_bottom: Array = []   # Bottom centers
 var spawn_y: float = 200.0
 var hitline_y: float = 1400.0
 var notes_layer: Control = null
@@ -76,9 +78,11 @@ var _fever_scratch_count: int = 0
 var _fever_door_opened: bool = false
 var _fever_time_offset: float = 0.0
 var _fever_start_real_sec: float = 0.0
-var _last_fever_end_t: float = -999.0
+var _fever_time_unfrozen: bool = false
+var fever_time_unfrozen: bool: get = get_fever_time_unfrozen
+func get_fever_time_unfrozen() -> bool: return _fever_time_unfrozen
 const DEBUG_FEVER_RESUME := true
-const RESUME_BOOST_SEC := 1.0
+const RESUME_MARGIN_SEC := 0.3 # Safety margin to ensure note enters from off-screen
 
 func start_run(diff: String = "normal") -> void:
 	var chart: Dictionary = ChartLoader.load_chart("track01", diff)
@@ -96,6 +100,7 @@ func start_run(diff: String = "normal") -> void:
 	cursor_holding = false
 	_fever_time_offset = 0.0
 	_fever_start_real_sec = 0.0
+	_fever_time_unfrozen = false
 	input_offset_ms = SaveData.input_offset_ms
 	_start_ticks = Time.get_ticks_msec()
 	_running = true
@@ -106,9 +111,8 @@ func stop_run() -> void:
 
 func now_sec() -> float:
 	var real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
-	# If we are currently IN fever, pretend time is stopped at precisely the moment fever started.
-	# If NOT in fever, subtract the total time we ever spent in fever.
-	if is_fever:
+	# Time is frozen only if in fever AND the door hasn't been opened yet.
+	if is_fever and not _fever_time_unfrozen:
 		return _fever_start_real_sec - _fever_time_offset
 	return real_sec - _fever_time_offset
 
@@ -122,13 +126,24 @@ func process_update() -> void:
 	if not _running:
 		return
 	var t: float = now_sec()
-	_spawn_pending_notes(t)
-	# During fever, freeze note positions (don't update movement)
+	# 1. Update fever state and handle time offsets first
+	_update_fever(t)
+	
+	# t might need to be re-evaluated since _update_fever could have fast-forwarded now_sec()
 	if not is_fever:
+		t = now_sec()
+	
+	# 2. Spawn incoming notes using the corrected time
+	_spawn_pending_notes(t)
+	
+	# 3. Update active notes (movement and auto-miss)
+	# Use normal movement if not in fever OR if time was unfrozen early
+	if not is_fever or _fever_time_unfrozen:
 		_update_active_notes(t)
 	else:
 		_update_active_notes_fever_frozen(t)
-	_update_fever(t)
+		
+	# 4. Check if run is over
 	_check_run_complete()
 
 ## ---- Input handlers ----
@@ -152,6 +167,35 @@ func award_door_bonus() -> void:
 	_fever_door_opened = true
 	score_changed.emit(score, combo)
 	fever_door_opened.emit(DOOR_OPEN_BONUS)
+	
+	# Resume notes immediately even if the 8s fever duration isn't up!
+	_unfreeze_fever_time()
+
+func _unfreeze_fever_time() -> void:
+	if not is_fever or _fever_time_unfrozen:
+		return
+	
+	var current_real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
+	var elapsed_fever: float = current_real_sec - _fever_start_real_sec
+	
+	# Unfreeze logic: bake the elapsed fever duration into the offset
+	_fever_time_offset += elapsed_fever
+	_fever_time_unfrozen = true
+	
+	# Fast-forward to the NEXT note spawn so there's no chart gap.
+	# Lead target is (next_note_t - approach_time - margin) to enter from off-screen.
+	if _spawn_index < _chart_notes.size():
+		var next_note_t: float = float(_chart_notes[_spawn_index].get("t", 0.0))
+		var target_resume_t: float = next_note_t - (_approach_time + RESUME_MARGIN_SEC)
+		var gap: float = target_resume_t - now_sec()
+		
+		# Only jump forward. If gap is negative, it means a note should have already spawned.
+		if gap > 0.0:
+			_fever_time_offset -= gap
+			if DEBUG_FEVER_RESUME:
+				print("[DEBUG FEVER] Time unfrozen. Gap %.3fs. Fast-forwarding to off-screen spawn." % gap)
+		elif DEBUG_FEVER_RESUME:
+			print("[DEBUG FEVER] Time unfrozen. Next note already in range. No jump needed.")
 
 ## TICKET 8.2+8.3: press on a lane → start a 꾹꾹 hold (with late latch grace)
 func handle_moving_press(lane: int) -> void:
@@ -236,15 +280,10 @@ func get_run_summary() -> Dictionary:
 ## ---- Internal ----
 
 func _spawn_pending_notes(t: float) -> void:
-	var boost: float = 0.0
-	if not is_fever and (t - _last_fever_end_t) <= 1.0:
-		boost = RESUME_BOOST_SEC
-
 	while _spawn_index < _chart_notes.size():
 		var nd: Dictionary = _chart_notes[_spawn_index]
 		var note_t: float = float(nd.get("t", 0.0))
-		# Apply boost to the spawn condition so notes spawn earlier right after fever
-		if note_t - _approach_time > t + boost:
+		if note_t - _approach_time > t:
 			break
 		_spawn_note(nd)
 		_spawn_index += 1
@@ -361,23 +400,47 @@ func _move_note_view(n: Dictionary, t: float) -> void:
 		return
 	var note_t: float = float(n.get("t", 0.0))
 	var spawn_t: float = note_t - _approach_time
-	# Use minf instead of clampf so early-spawned notes (negative progress) 
-	# spawn naturally further up off-screen instead of clamping to the spawn line
+	# 1.0 = hitline, < 0.0 = spawning high up
 	var progress: float = minf((t - spawn_t) / _approach_time, 1.0)
 	var note_bottom_y: float = lerpf(spawn_y, hitline_y, progress)
+	
+	# Perspective X: Lerp between top and bottom lane centers
+	var progress_clamped: float = clampf(progress, 0.0, 1.0)
+	var x: float = _get_note_x_perspective(n, progress_clamped) - view.size.x * 0.5
+	
 	var y: float = note_bottom_y - view.size.y
-	var x: float = _get_note_x(n) - view.size.x * 0.5
 	view.position = Vector2(x, y)
 
+func _get_note_x_perspective(n: Dictionary, progress: float) -> float:
+	var ntype: String = str(n.get("type", "tap"))
+	var lane: int = int(n.get("lane", 1))
+	
+	# Determine start/end X for this lane
+	var x_start := 540.0
+	var x_end := 540.0
+	
+	if ntype == "scratch":
+		var l0: int = clampi(lane, 0, NUM_LANES - 2)
+		if lane_centers_top.size() > l0 + 1:
+			x_start = (lane_centers_top[l0] + lane_centers_top[l0 + 1]) * 0.5
+			x_end = (lane_centers_bottom[l0] + lane_centers_bottom[l0 + 1]) * 0.5
+	else:
+		if lane_centers_top.size() > lane:
+			x_start = lane_centers_top[lane]
+			x_end = lane_centers_bottom[lane]
+			
+	return lerpf(x_start, x_end, progress)
+
 func _get_note_x(n: Dictionary) -> float:
+	# Keep for legacy/initial spawn calcs if needed, but movement uses perspective
 	var ntype: String = str(n.get("type", "tap"))
 	var lane: int = int(n.get("lane", 1))
 	if ntype == "scratch":
 		var l0: int = clampi(lane, 0, NUM_LANES - 2)
-		if lane_centers_x.size() > l0 + 1:
-			return (lane_centers_x[l0] + lane_centers_x[l0 + 1]) * 0.5
-	if lane_centers_x.size() > lane:
-		return lane_centers_x[lane]
+		if lane_centers_bottom.size() > l0 + 1:
+			return (lane_centers_bottom[l0] + lane_centers_bottom[l0 + 1]) * 0.5
+	if lane_centers_bottom.size() > lane:
+		return lane_centers_bottom[lane]
 	return 540.0
 
 func _judge_nearest(input_type: String, input_lane: int, _unused: int) -> int:
@@ -400,8 +463,8 @@ func _judge_nearest(input_type: String, input_lane: int, _unused: int) -> int:
 		if int(candidate.get("lane", -1)) != input_lane:
 			continue
 		var c_delta: float = absf((t - float(candidate.get("t", 0.0))) * 1000.0)
-		# Widen the valid hit window for candidates (was 130ms, now 200ms) to allow early/late "SO-SO" or slightly worse hits on mobile
-		if c_delta > 200.0:
+		# Widen the valid hit window for candidates to 300ms to be more forgiving for mobile touch lag etc
+		if c_delta > 300.0:
 			continue
 		if _is_note_in_zone(candidate, t):
 			if c_delta < in_zone_abs:
@@ -413,16 +476,32 @@ func _judge_nearest(input_type: String, input_lane: int, _unused: int) -> int:
 				out_zone_i = i
 	# Prefer in-zone, fall back to out-zone
 	var best_i: int = in_zone_i if in_zone_i >= 0 else out_zone_i
+	
 	if best_i == -1:
+		# Diagnostic: Why did we fail?
+		var total_active := _active_notes.size()
+		var type_matches := 0
+		var lane_matches := 0
+		for c in _active_notes:
+			if str(c.get("type", "")) == input_type: type_matches += 1
+			if int(c.get("lane", -1)) == input_lane: lane_matches += 1
+		print("[JUDGE] No match. Type=%s Lane=%d | Active=%d TypeMatch=%d LaneMatch=%d" % [input_type, input_lane, total_active, type_matches, lane_matches])
 		return -1
+		
 	var matched: Dictionary = _active_notes[best_i]
 	matched["judged"] = true
 	var matched_delta: float = (t - float(matched.get("t", 0.0))) * 1000.0
 	var grade: int = Judgement.get_grade(matched_delta)
+	
+	print("[JUDGE] %s lane=%d best=%d delta_ms=%.1f grade=%d" % [input_type, input_lane, best_i, matched_delta, grade])
+	
 	_inc(grade)
 	judgement_emitted.emit(grade, matched_delta)
 	_free_view(matched)
-	_active_notes.remove_at(best_i)
+	# Safely remove from index if it hasn't been cleared already
+	if best_i >= 0 and _active_notes.size() > best_i:
+		if _active_notes[best_i] == matched:
+			_active_notes.remove_at(best_i)
 	return grade
 
 func _is_note_in_zone(n: Dictionary, t: float) -> bool:
@@ -461,6 +540,7 @@ func _spawn_note(nd: Dictionary) -> void:
 func _check_run_complete() -> void:
 	if _spawn_index >= _chart_notes.size() and _active_notes.is_empty():
 		_running = false
+		SaveData.last_run_summary = get_run_summary() # SAVE STATS NOW
 		run_finished.emit()
 
 func _free_view(n: Dictionary) -> void:
@@ -519,7 +599,7 @@ func _start_fever() -> void:
 	_clear_active_notes()
 	# Rewind spawn index so notes after frozen time can re-spawn after fever ends
 	var frozen_t: float = now_sec()
-	_spawn_index = 0
+	_spawn_index = _chart_notes.size() # DEFAULT TO END
 	for i in range(_chart_notes.size()):
 		var note_t: float = float(_chart_notes[i].get("t", 0.0))
 		if note_t - _approach_time > frozen_t:
@@ -538,19 +618,13 @@ func _update_fever(t: float) -> void:
 		var current_real_sec: float = (Time.get_ticks_msec() - _start_ticks) / 1000.0
 		var elapsed_fever: float = current_real_sec - _fever_start_real_sec
 		if elapsed_fever >= FEVER_DURATION:
-			# Bake the paused duration into the offset so time resumes smoothly from where it froze
-			_fever_time_offset += elapsed_fever
+			# Ensure time is unfrozen if not already done by door opening
+			_unfreeze_fever_time()
 			is_fever = false
-			_last_fever_end_t = now_sec()
-			
-			if DEBUG_FEVER_RESUME:
-				var next_note_t: float = -1.0
-				if _spawn_index < _chart_notes.size():
-					next_note_t = float(_chart_notes[_spawn_index].get("t", 0.0))
-				var gap: float = (next_note_t - _approach_time) - _last_fever_end_t
-				print("[DEBUG FEVER] Fever ended at t=%.3f, next_note_t=%.3f, gap_to_spawn=%.3f (boost=%s)" % [_last_fever_end_t, next_note_t, gap, gap <= RESUME_BOOST_SEC])
-				
 			fever_ended.emit()
+			if DEBUG_FEVER_RESUME:
+				print("[DEBUG FEVER] Fever expired at t=" + str(t) + ". Resetting state.")
+
 
 func get_score_multiplier() -> float:
 	return FEVER_MULTIPLIER if is_fever else 1.0
