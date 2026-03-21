@@ -104,6 +104,7 @@ func start_run(diff: String = "normal") -> void:
 	input_offset_ms = SaveData.input_offset_ms
 	_start_ticks = Time.get_ticks_msec()
 	_running = true
+	print("[GameController] START RUN: SpawnY=%.1f HitlineY=%.1f" % [spawn_y, hitline_y])
 
 func stop_run() -> void:
 	_running = false
@@ -402,7 +403,10 @@ func _move_note_view(n: Dictionary, t: float) -> void:
 	var spawn_t: float = note_t - _approach_time
 	# 1.0 = hitline, < 0.0 = spawning high up
 	var progress: float = minf((t - spawn_t) / _approach_time, 1.0)
-	var note_bottom_y: float = lerpf(spawn_y, hitline_y, progress)
+	# Defensive: Ensure target is below spawn
+	var effective_hit_y := maxf(hitline_y, spawn_y + 100.0)
+	
+	var note_bottom_y: float = lerpf(spawn_y, effective_hit_y, progress)
 	
 	# Perspective X: Lerp between top and bottom lane centers
 	var progress_clamped: float = clampf(progress, 0.0, 1.0)
@@ -410,6 +414,10 @@ func _move_note_view(n: Dictionary, t: float) -> void:
 	
 	var y: float = note_bottom_y - view.size.y
 	view.position = Vector2(x, y)
+	
+	# Diagnostic log if anomaly detected
+	if progress > 0.0 and progress < 1.0 and y < -2000.0:
+		print("[STABILITY] Abnormal note Y detected: %.1f. Progress: %.2f" % [y, progress])
 
 func _get_note_x_perspective(n: Dictionary, progress: float) -> float:
 	var ntype: String = str(n.get("type", "tap"))

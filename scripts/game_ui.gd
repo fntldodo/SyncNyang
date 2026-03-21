@@ -85,22 +85,50 @@ func _ready() -> void:
 	
 	_initialize_modules()
 	
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# Wait for layout to settle (Max 10 frames)
+	var safety_counter := 0
+	while safety_counter < 10:
+		if hit_line.global_position.y > 400.0:
+			break
+		await get_tree().process_frame
+		safety_counter += 1
+	
+	if hit_line.global_position.y <= 400.0:
+		push_warning("[GameUI] Layout wait timed out. Using fallback hitline_y.")
+	
 	_late_init()
 
 func _late_init() -> void:
 	if not is_inside_tree(): return
+	
+	# Coordinate Stability Check & Fallback
+	var vs := get_viewport().get_visible_rect().size
+	var h_y := hit_line.global_position.y - global_position.y
+	if h_y <= 400.0:
+		h_y = vs.y - 250.0 # Fallback: Bottom-safe area
+		print("[GameUI] STABILITY: hitline_y corrected to fallback %.1f" % h_y)
 	
 	# HOTFIX: Transparent TapArea
 	tap_area.self_modulate = Color(1, 1, 1, 0.0)
 	tap_area.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	
 	_apply_safe_area()
-	_setup_controller()
+	_setup_controller_with_pos(h_y)
 	_create_visual_layers()
 	_reposition_visuals()
 	_start_chart(SceneRouter.selected_difficulty)
+
+func _setup_controller_with_pos(h_y: float) -> void:
+	if not is_inside_tree() or not get_viewport(): return
+	var vs := get_viewport().get_visible_rect().size
+	game_controller.lane_centers_top = LaneGeometry.get_lane_centers(vs, 0.0)
+	game_controller.lane_centers_bottom = LaneGeometry.get_lane_centers(vs, 1.0)
+	game_controller.hitline_y = h_y
+	game_controller.notes_layer = notes_layer
+	game_controller.hit_zone_half_h = HIT_ZONE_HEIGHT * 0.5
+	game_controller.spawn_y = 120.0
+	print("[GameUI] Controller ready. HitlineY=%.1f SpawnY=%.1f" % [h_y, game_controller.spawn_y])
+
 
 func _initialize_modules() -> void:
 	fever_ui = FeverUI.new()
@@ -113,16 +141,6 @@ func _initialize_modules() -> void:
 		add_child(calib_ui)
 		calib_ui.setup(game_controller)
 
-func _setup_controller() -> void:
-	if not is_inside_tree() or not get_viewport(): return
-	var vs := get_viewport().get_visible_rect().size
-	# Coordinate Stability
-	game_controller.lane_centers_top = LaneGeometry.get_lane_centers(vs, 0.0)
-	game_controller.lane_centers_bottom = LaneGeometry.get_lane_centers(vs, 1.0)
-	game_controller.hitline_y = hit_line.global_position.y - global_position.y
-	game_controller.notes_layer = notes_layer
-	game_controller.hit_zone_half_h = HIT_ZONE_HEIGHT * 0.5
-	game_controller.spawn_y = 120.0
 
 func _create_visual_layers() -> void:
 	# 1. Cleanup Old Layers if any
@@ -161,20 +179,20 @@ func _create_visual_layers() -> void:
 func _build_lane_pngs() -> void:
 	_lane_tex.clear()
 	for i in range(NUM_LANES):
-		var tr := TextureRect.new()
-		tr.texture = load("res://assets/line%d.PNG" % (i + 1))
-		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_SCALE
-		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var lane_tr := TextureRect.new()
+		lane_tr.texture = load("res://assets/line%d.PNG" % (i + 1))
+		lane_tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		lane_tr.stretch_mode = TextureRect.STRETCH_SCALE
+		lane_tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		
 		# VISIBILITY ARGS (Restored for visibility)
-		tr.self_modulate = Color(2.0, 2.0, 2.0, 1.0) # Brightness boost needed
-		tr.texture_filter = TEXTURE_FILTER_NEAREST
-		tr.visible = true
+		lane_tr.self_modulate = Color(2.0, 2.0, 2.0, 1.0) # Brightness boost needed
+		lane_tr.texture_filter = TEXTURE_FILTER_NEAREST
+		lane_tr.visible = true
 		
-		lane_layer.add_child(tr)
-		_lane_tex.append(tr)
-		print("[PNG_LANE] i=%d tex=%s status=OK" % [i, tr.texture])
+		lane_layer.add_child(lane_tr)
+		_lane_tex.append(lane_tr)
+		print("[PNG_LANE] i=%d tex=%s status=OK" % [i, lane_tr.texture])
 
 func _build_hit_pngs() -> void:
 	_hit_tex.clear()
@@ -202,13 +220,13 @@ func _reposition_visuals() -> void:
 
 	# Reposition Lanes (Simple 3rd Split)
 	for i in range(_lane_tex.size()):
-		var tr = _lane_tex[i]
+		var lane_tr = _lane_tex[i]
 		var l_x = i * lane_w
 		var l_w = lane_w * 0.98
 		var l_h = (hitline_y - top_y) + HIT_ZONE_HEIGHT * 0.5
-		tr.position = Vector2(l_x + (lane_w * 0.01), top_y)
-		tr.size = Vector2(l_w, max(l_h, 400.0))
-		print("[LANE_TEX] i=%d size=%s pos=%s" % [i, tr.size, tr.position])
+		lane_tr.position = Vector2(l_x + (lane_w * 0.01), top_y)
+		lane_tr.size = Vector2(l_w, max(l_h, 400.0))
+		print("[LANE_TEX] i=%d size=%s pos=%s" % [i, lane_tr.size, lane_tr.position])
 
 	# Reposition HitBoxes
 	for i in range(_hit_tex.size()):
@@ -234,7 +252,8 @@ func _on_viewport_resized() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_apply_safe_area()
-	_setup_controller()
+	var h_y := hit_line.global_position.y - global_position.y
+	_setup_controller_with_pos(h_y)
 	_reposition_visuals()
 
 func _process(_delta: float) -> void:

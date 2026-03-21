@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://diwsdwsmfempy"
+path="res://.godot/imported/Pastel Star Parade (1).mp3-b83b3a2aac42cd07ab8d29ace624489e.mp3str"
+
+[deps]
+
+source_file="res://assets/assets_audio_/Pastel Star Parade (1).mp3"
+dest_files=["res://.godot/imported/Pastel Star Parade (1).mp3-b83b3a2aac42cd07ab8d29ace624489e.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

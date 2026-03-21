@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://b4l5yw3q0wra"
+path="res://.godot/imported/Pastel Button Parade.mp3-795ba31a5564d66deb2da54e0448dd1f.mp3str"
+
+[deps]
+
+source_file="res://assets/assets_audio_/Pastel Button Parade.mp3"
+dest_files=["res://.godot/imported/Pastel Button Parade.mp3-795ba31a5564d66deb2da54e0448dd1f.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

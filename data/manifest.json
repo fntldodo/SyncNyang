@@ -1,0 +1,18 @@
+[
+  {
+    "song_id": "bgm_01",
+    "title": "SyncNyang Test BGM 01",
+    "artist": "SyncNyang Team",
+    "duration": 70.0,
+    "preview_start": 0.0,
+    "chart_path": "res://data/charts/syncnyang_test_bgm_01.json"
+  },
+  {
+    "song_id": "bgm_02",
+    "title": "SyncNyang Test BGM 02",
+    "artist": "SyncNyang Team",
+    "duration": 80.0,
+    "preview_start": 0.0,
+    "chart_path": "res://data/charts/syncnyang_test_bgm_02.json"
+  }
+]
